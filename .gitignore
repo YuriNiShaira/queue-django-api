@@ -1,0 +1,16 @@
+# Python stuff
+*.pyc
+__pycache__/
+
+# Environment variables
+.env
+
+# SQLite (if local)
+db.sqlite3
+
+# Django static files
+/staticfiles/
+
+# IDE files (optional)
+.vscode/
+.idea/
