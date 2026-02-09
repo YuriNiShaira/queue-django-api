@@ -36,7 +36,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
-
+    'drf_spectacular',
     'corsheaders',
     'rest_framework',
     'queueing',
@@ -63,6 +63,7 @@ CORS_ALLOW_CREDENTIALS = True  # Allow cookies to be sent
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "http://localhost:5173",
     # Add your frontend URLs here
 ]
 
@@ -70,6 +71,7 @@ CORS_ALLOWED_ORIGINS = [
 CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
+    "http://localhost:5173",
 ]
 
 
@@ -161,6 +163,7 @@ REST_FRAMEWORK = {
     'DEFAULT_PERMISSION_CLASSES': (
         'rest_framework.permissions.IsAuthenticated',
     ),
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
 }
 
 from datetime import timedelta
@@ -193,3 +196,19 @@ SIMPLE_JWT = {
     'AUTH_COOKIE_DOMAIN': None,  # Cookie domain
 }
 
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Queue Management API',
+    'DESCRIPTION': 'API for managing queueing system for services',
+    'VERSION': '1.0.0',
+    'SERVE_INCLUDE_SCHEMA': False,
+    'TAGS': [
+        {'name': 'Authentication', 'description': 'User authentication and authorization'},
+        {'name': 'Public Endpoints', 'description': 'Public APIs for ticket generation and status'},
+        {'name': 'Service Management', 'description': 'Admin operations for managing services'},
+        {'name': 'Service Window Management', 'description': 'Manage service windows and counters'},
+        {'name': 'Staff Queue Management', 'description': 'Staff operations for managing queues'},
+    ],
+    'COMPONENT_SPLIT_REQUEST': True,
+    'SCHEMA_PATH_PREFIX': '/api/queueing/',
+}

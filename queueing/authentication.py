@@ -22,7 +22,7 @@ class JWTCookieAuthentication(JWTAuthentication):
         try:
             validated_token = self.get_validated_token(access_token)
             return self.get_user(validated_token), validated_token
-        except(InvalidToken, AuthenticationFailed):
+        except (InvalidToken, AuthenticationFailed):
             return None
         
 
@@ -55,6 +55,10 @@ def set_jwt_cookies(response, user):
 
 
 def delete_jwt_cookies(response):
-    response.delete_cookie(settings.SIMPLE_JWT.get('AUTH_COOKIE', 'access_token'))
-    response.delete_cookie(settings.SIMPLE_JWT.get('AUTH_COOKIE_REFRESH', 'refresh_token'))
-    return response
+    try:
+        response.delete_cookie(settings.SIMPLE_JWT.get('AUTH_COOKIE', 'access_token'))
+        response.delete_cookie(settings.SIMPLE_JWT.get('AUTH_COOKIE_REFRESH', 'refresh_token'))
+        return response
+    except Exception as e:
+        print(f"JWT cookie error: {e}")
+        return response

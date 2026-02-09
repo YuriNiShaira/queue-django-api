@@ -1,0 +1,12 @@
+aMtQUEUE TICKET
+M================================
+aService:  Cashier
+Ma#C002
+MaDate:     2026-02-09
+Time:     03:40 PM
+================================
+aScan QR to check
+your status
+
+Thank you for waiting!
+d[CUT]

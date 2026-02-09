@@ -1,6 +1,6 @@
 """
 ESC/POS thermal printer utilities using python-escpos library
-UPDATED: Compatible with current Ticket model (no ticket.service)
+UPDATED: Compatible with current Ticket model structure
 """
 
 import os
@@ -31,11 +31,13 @@ class TicketPrinter:
 
         # ===== SERVICE =====
         printer.set(align='left')
-        printer.textln(f"Service:  {ticket.service_name}")
+        printer.textln(f"Service:  {ticket.service.name}")
 
         # ===== QUEUE NUMBER =====
         printer.set(align='center', font='b', width=4, height=4)
-        printer.textln(f"#{ticket.get_display_number()}")
+        # Use display_number if it exists, otherwise generate it
+        display_num = ticket.display_number or f"{ticket.service.prefix}{ticket.queue_number:03d}"
+        printer.textln(f"#{display_num}")
 
         # ===== DATE & TIME =====
         printer.set(align='left', font='a', width=1, height=1)
@@ -55,7 +57,7 @@ class TicketPrinter:
 
         raw_bytes = printer.output
         human_readable = TicketPrinter._bytes_to_human_readable(raw_bytes)
-        preview_html = TicketPrinter._generate_html_preview(ticket)
+        preview_html = TicketPrinter._generate_html_preview(ticket, display_num)
 
         return raw_bytes, human_readable, preview_html
 
@@ -86,7 +88,7 @@ class TicketPrinter:
         return "".join(result)
 
     @staticmethod
-    def _generate_html_preview(ticket):
+    def _generate_html_preview(ticket, display_number):
         """Generate HTML preview for browser"""
         local_time = localtime(ticket.created_at)
 
@@ -108,6 +110,24 @@ class TicketPrinter:
             background: white;
             text-align: center;
         }}
+        .queue-number {{
+            font-size: 48px;
+            font-weight: bold;
+            margin: 20px 0;
+            color: #333;
+        }}
+        .ticket-info {{
+            text-align: left;
+            margin: 15px 0;
+        }}
+        .ticket-info p {{
+            margin: 8px 0;
+        }}
+        hr {{
+            border: none;
+            border-top: 2px solid #333;
+            margin: 20px 0;
+        }}
     </style>
 </head>
 <body>
@@ -115,15 +135,22 @@ class TicketPrinter:
     <div class="ticket">
         <h2>QUEUE TICKET</h2>
         <hr>
-        <p style="text-align:left;"><strong>Service:</strong> {ticket.service_name}</p>
-        <p style="text-align:left;"><strong>Date:</strong> {ticket.ticket_date}</p>
-
-        <h1 style="font-size:3em;">#{ticket.get_display_number()}</h1>
-
-        <p style="text-align:left;"><strong>Time:</strong> {local_time.strftime('%I:%M %p')}</p>
+        <div class="ticket-info">
+            <p><strong>Service:</strong> {ticket.service.name}</p>
+            <p><strong>Date:</strong> {ticket.ticket_date}</p>
+            <p><strong>Time:</strong> {local_time.strftime('%I:%M %p')}</p>
+        </div>
+        <hr>
+        
+        <div class="queue-number">#{display_number}</div>
+        
+        <hr>
+        <p><strong>People Ahead:</strong> {ticket.people_ahead}</p>
+        <p><strong>Estimated Wait:</strong> {ticket.wait_time_minutes} minutes</p>
         <hr>
         <p>Scan QR to check status</p>
         <p><strong>Thank you for waiting!</strong></p>
+        <p><small>Ticket ID: {ticket.ticket_id}</small></p>
     </div>
 </body>
 </html>
@@ -135,7 +162,8 @@ class TicketPrinter:
         test_dir = os.path.join(settings.BASE_DIR, 'test_prints')
         os.makedirs(test_dir, exist_ok=True)
 
-        base_name = f"ticket_{ticket.queue_number:03d}"
+        # Use ticket ID for filename to avoid conflicts
+        base_name = f"ticket_{ticket.ticket_id}"
 
         raw_path = os.path.join(test_dir, f"{base_name}.bin")
         with open(raw_path, 'wb') as f:
@@ -170,6 +198,14 @@ class MockPrinter:
                 'success': True,
                 'preview_html': preview_html,
                 'length_bytes': len(raw_bytes),
+                'raw_bytes': raw_bytes,
+                'hex_string': ' '.join(f'{b:02X}' for b in raw_bytes),
+                'ticket_info': {
+                    'display_number': ticket.display_number,
+                    'service': ticket.service.name,
+                    'queue_number': ticket.queue_number,
+                    'ticket_id': str(ticket.ticket_id)
+                }
             }
 
             if save_to_file:
@@ -186,10 +222,13 @@ class MockPrinter:
                 'fallback_text': f"""
 QUEUE TICKET
 ================
-Service:  {ticket.service_name}
+Service:  {ticket.service.name}
 Date:     {ticket.ticket_date}
-Number:   #{ticket.get_display_number()}
+Number:   #{ticket.display_number or f'{ticket.service.prefix}{ticket.queue_number:03d}'}
 Time:     {localtime(ticket.created_at).strftime('%I:%M %p')}
+================
+People Ahead: {ticket.people_ahead}
+Estimated Wait: {ticket.wait_time_minutes} minutes
 ================
 """
             }
@@ -201,9 +240,11 @@ Time:     {localtime(ticket.created_at).strftime('%I:%M %p')}
                 'fallback_text': f"""
 QUEUE TICKET
 ================
-Service:  {ticket.service_name}
+Service:  {ticket.service.name}
 Date:     {ticket.ticket_date}
-Number:   #{ticket.get_display_number()}
+Number:   #{ticket.display_number or f'{ticket.service.prefix}{ticket.queue_number:03d}'}
+================
+Ticket ID: {ticket.ticket_id}
 ================
 """
             }

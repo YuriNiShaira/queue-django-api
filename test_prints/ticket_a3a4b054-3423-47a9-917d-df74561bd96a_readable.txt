@@ -1,9 +1,9 @@
 aMtQUEUE TICKET
 M================================
 aService:  Cashier
-Ma#002
-MaDate:     2026-02-03
-Time:     08:49 AM
+Ma#C003
+MaDate:     2026-02-08
+Time:     10:37 AM
 ================================
 aScan QR to check
 your status
