@@ -37,6 +37,7 @@ class ServiceSerializer(serializers.ModelSerializer):
     def get_currently_serving(self, obj):
         serving = obj.currently_serving
         if serving:
+            from .serializers import ServiceWindowSerializer 
             return {
                 'ticket_id': str(serving.ticket_id),
                 'display_number': serving.display_number,
