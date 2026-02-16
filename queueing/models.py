@@ -1,9 +1,11 @@
 import uuid
 from django.db import models
 from django.utils import timezone
+from django.db.models import Max
 from django.db.models.signals import post_migrate
 from django.dispatch import receiver
 from django.contrib.auth.models import User
+
 
 # =======================
 # SERVICE MODELS
@@ -14,39 +16,33 @@ class Service(models.Model):
     prefix = models.CharField(max_length=10, default="", blank=True)
     is_active = models.BooleanField(default=True)
     average_service_time = models.PositiveIntegerField(default=5)
-    
-    # Queue management
-    current_queue_number = models.PositiveIntegerField(default=0)
-    last_queue_reset = models.DateField(auto_now=True)
-    
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         ordering = ['name']
-    
+
     def __str__(self):
         return self.name
-    
+
+    # 🔥 NEW SAFE VERSION
     def get_next_queue_number(self):
-        """Get the next queue number, resetting if new day"""
         today = timezone.now().date()
-        
-        if self.last_queue_reset != today:
-            self.current_queue_number = 0
-            self.last_queue_reset = today
-            self.save()
-        
-        self.current_queue_number += 1
-        self.save()
-        return self.current_queue_number
-    
+
+        last_ticket = self.tickets.filter(
+            ticket_date=today
+        ).aggregate(Max('queue_number'))['queue_number__max']
+
+        if last_ticket:
+            return last_ticket + 1
+        return 1
+
     def get_display_number(self, queue_number):
-        """Format queue number with prefix"""
         if self.prefix:
             return f"{self.prefix}{queue_number:03d}"
         return f"{queue_number:03d}"
-    
+
     @property
     def waiting_count(self):
         today = timezone.now().date()
@@ -54,7 +50,7 @@ class Service(models.Model):
             ticket_date=today,
             status__in=['waiting', 'notified']
         ).count()
-    
+
     @property
     def currently_serving(self):
         today = timezone.now().date()
@@ -63,36 +59,42 @@ class Service(models.Model):
             status='serving'
         ).first()
 
+
 class ServiceWindow(models.Model):
-    """Physical window/counter for a service"""
     WINDOW_STATUS = [
         ('active', 'Active'),
         ('inactive', 'Inactive'),
         ('maintenance', 'Under Maintenance'),
     ]
-    
+
     service = models.ForeignKey(Service, on_delete=models.CASCADE, related_name='windows')
-    window_number = models.PositiveIntegerField(help_text="Window number within the service")
-    name = models.CharField(max_length=100, blank=True, help_text="Window name (e.g., 'Window 1', 'Counter A')")
+    window_number = models.PositiveIntegerField()
+    name = models.CharField(max_length=100, blank=True)
     status = models.CharField(max_length=20, choices=WINDOW_STATUS, default='active')
     description = models.TextField(blank=True)
-    
-    # Current staff assigned to this window (optional)
-    current_staff = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_window')
-    
+
+    current_staff = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='assigned_window'
+    )
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
+
     class Meta:
         ordering = ['service', 'window_number']
         unique_together = ['service', 'window_number']
-    
+
     def __str__(self):
         return f"{self.service.name} - {self.name or f'Window {self.window_number}'}"
-    
+
     @property
     def is_available(self):
         return self.status == 'active'
+
 
 # =======================
 # STAFF PROFILE
@@ -102,22 +104,23 @@ class StaffProfile(models.Model):
         ('admin', 'Administrator'),
         ('staff', 'Staff Member'),
     ]
-    
+
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='staff_profile')
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='staff')
     assigned_service = models.ForeignKey(Service, on_delete=models.SET_NULL, null=True, blank=True)
     can_manage_queue = models.BooleanField(default=True)
-    
+
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
-    
-    def __str__(self):
-        service_name = self.assigned_service.name if self.assigned_service else "No Service"
-        return f"{self.user.username} - {service_name}"
-    
+
     class Meta:
         verbose_name = 'Staff Profile'
         verbose_name_plural = 'Staff Profiles'
+
+    def __str__(self):
+        service_name = self.assigned_service.name if self.assigned_service else "No Service"
+        return f"{self.user.username} - {service_name}"
+
 
 # =======================
 # TICKET MODEL
@@ -131,28 +134,33 @@ class Ticket(models.Model):
         ('cancelled', 'Cancelled'),
         ('skipped', 'Skipped'),
     ]
-    
+
     ticket_id = models.UUIDField(default=uuid.uuid4, editable=False, unique=True)
     service = models.ForeignKey(Service, on_delete=models.CASCADE, related_name='tickets')
     queue_number = models.PositiveIntegerField(default=0)
     display_number = models.CharField(max_length=20, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='waiting')
-    
-    # Window assignment
-    assigned_window = models.ForeignKey(ServiceWindow, on_delete=models.SET_NULL, null=True, blank=True, related_name='tickets')
-    
+
+    assigned_window = models.ForeignKey(
+        ServiceWindow,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='tickets'
+    )
+
     ticket_date = models.DateField(default=timezone.now)
-    
+
     called_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='called_tickets')
     served_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='served_tickets')
-    
+
     created_at = models.DateTimeField(auto_now_add=True)
     called_at = models.DateTimeField(null=True, blank=True)
     served_at = models.DateTimeField(null=True, blank=True)
     skipped_at = models.DateTimeField(null=True, blank=True)
-    
-    notes = models.TextField(blank=True, help_text="Staff notes (reason for skip, etc.)")
-    
+
+    notes = models.TextField(blank=True)
+
     class Meta:
         ordering = ['service', 'ticket_date', 'queue_number']
         unique_together = ['service', 'queue_number', 'ticket_date']
@@ -161,37 +169,40 @@ class Ticket(models.Model):
             models.Index(fields=['service', 'status']),
             models.Index(fields=['assigned_window', 'status']),
         ]
-    
+
     def __str__(self):
         return f"{self.service.name} - {self.display_number}"
-    
+
     def save(self, *args, **kwargs):
-        if not self.pk:
+        if self._state.adding:
             self.ticket_date = timezone.now().date()
             self.queue_number = self.service.get_next_queue_number()
             self.display_number = self.service.get_display_number(self.queue_number)
+
         super().save(*args, **kwargs)
-    
+
     @property
     def people_ahead(self):
         if self.status in ['serving', 'served', 'cancelled', 'skipped']:
             return 0
+
         return Ticket.objects.filter(
             service=self.service,
             ticket_date=self.ticket_date,
             status__in=['waiting', 'notified'],
             queue_number__lt=self.queue_number
         ).count()
-    
+
     @property
     def is_today(self):
         return self.ticket_date == timezone.now().date()
-    
+
     @property
     def wait_time_minutes(self):
         if self.status in ['served', 'cancelled', 'skipped']:
             return 0
         return self.people_ahead * self.service.average_service_time
+
 
 # =======================
 # POST MIGRATE INITIAL DATA
@@ -201,9 +212,6 @@ def create_initial_data(sender, **kwargs):
     if sender.name != 'queueing':
         return
 
-    from django.contrib.auth.models import User
-    
-    # ====== CREATE ADMIN ======
     admin_user, created = User.objects.get_or_create(
         username='admin',
         defaults={
@@ -214,42 +222,9 @@ def create_initial_data(sender, **kwargs):
             'is_staff': True
         }
     )
+
     if created:
         admin_user.set_password('admin123')
         admin_user.save()
-    
+
     StaffProfile.objects.get_or_create(user=admin_user, defaults={'role': 'admin'})
-    
-    # ====== CREATE SAMPLE SERVICES ======
-    if not Service.objects.exists():
-        # Cashier
-        cashier = Service.objects.create(
-            name='Cashier',
-            description='Payment and financial transactions',
-            prefix='C',
-            is_active=True,
-            average_service_time=7
-        )
-        # Registrar
-        registrar = Service.objects.create(
-            name='Registrar',
-            description='Student records and enrollment',
-            prefix='R',
-            is_active=True,
-            average_service_time=10
-        )
-        # Permit
-        permit = Service.objects.create(
-            name='Permit Office',
-            description='School permits and clearances',
-            prefix='P',
-            is_active=True,
-            average_service_time=15
-        )
-        
-        # Create windows
-        for i in range(1, 5):
-            ServiceWindow.objects.create(service=cashier, window_number=i, name=f'Cashier Window {i}', status='active')
-        for i in range(1, 3):
-            ServiceWindow.objects.create(service=registrar, window_number=i, name=f'Registrar Window {i}', status='active')
-        ServiceWindow.objects.create(service=permit, window_number=1, name='Permit Counter', status='active')
