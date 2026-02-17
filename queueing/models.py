@@ -94,6 +94,19 @@ class ServiceWindow(models.Model):
     @property
     def is_available(self):
         return self.status == 'active'
+    
+    def assign_staff(self, staff_user):
+        # Clear this staff from any other window
+        ServiceWindow.objects.filter(current_staff=staff_user).update(current_staff=None)
+        
+        # Assign to this window
+        self.current_staff = staff_user
+        self.save()
+        
+        # Update staff profile
+        if hasattr(staff_user, 'staff_profile'):
+            staff_user.staff_profile.current_window = self
+            staff_user.staff_profile.save()
 
 
 # =======================
@@ -109,6 +122,10 @@ class StaffProfile(models.Model):
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='staff')
     assigned_service = models.ForeignKey(Service, on_delete=models.SET_NULL, null=True, blank=True)
     can_manage_queue = models.BooleanField(default=True)
+    current_window = models.ForeignKey(ServiceWindow, on_delete=models.SET_NULL, null=True, blank=True, related_name='currently_manning_staff') 
+
+    last_login_at = models.DateTimeField(null=True, blank=True)
+    last_logout_at = models.DateTimeField(null=True, blank=True)
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -120,6 +137,37 @@ class StaffProfile(models.Model):
     def __str__(self):
         service_name = self.assigned_service.name if self.assigned_service else "No Service"
         return f"{self.user.username} - {service_name}"
+
+    def set_current_window(self, window_id):
+        # Set the window this staff is currently manning
+        try:
+            window = ServiceWindow.objects.get(
+                id = window_id,
+                service = self.assigned_service,
+                status = 'active'
+            )
+
+            # Clear previous staff from this window
+            ServiceWindow.objects.filter(current_staff=self.user).update(current_staff=None)
+
+            # Assign this staff to new window
+            window.current_staff = self.user
+            window.save()
+
+            # Update profile
+            self.current_window = window
+            self.save()
+            
+            return window
+        except ServiceWindow.DoesNotExist:
+            return None
+        
+    def clear_current_window(self):
+        if self.current_window:
+            self.current_window.current_staff = None
+            self.current_window.save()
+            self.current_window = None
+            self.save()
 
 
 # =======================
