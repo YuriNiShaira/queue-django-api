@@ -68,39 +68,101 @@ def staff_dashboard(request):
 
 
 @extend_schema(
-    summary="queue management",
-    description="Staff operations for managing queues",
+    summary="Call Next Ticket",
+    description="Call the next waiting ticket to the staff's current window",
     tags=['Staff Queue Management']
 )
 @api_view(['POST'])
 @permission_classes([IsServiceStaff])
 def call_next_ticket(request):
     """Call the next waiting ticket"""
-    staff_profile = request.user.staff_profile
-    service = staff_profile.assigned_service
+    if not hasattr(request.user, 'staff_profile'):
+        return Response({'success': False,'message': 'User is not a staff member'}, status=status.HTTP_403_FORBIDDEN)
     
-    if not service:
-        return Response({'success': False,'message': 'No service assigned to your account'}, status=status.HTTP_400_BAD_REQUEST)
+    staff_profile = request.user.staff_profile
+
+     # Check if staff has selected a window
+    if not staff_profile.current_window:
+        return Response({'success': False,'message': 'Please select a window first'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    service = staff_profile.assigned_service
+    window = staff_profile.current_window
+
+    # Double-check window is active
+    if window.status != 'active':
+        return Response({'success': False,'message': f'Window {window.name} is not active'}, status=status.HTTP_400_BAD_REQUEST)
     
     today = timezone.now().date()
-    
-    # Find next waiting ticket
+
+    # Find next waiting ticket (priority: waiting -> notified)
+    # We check 'notified' first in case someone was called but not served
+
     next_ticket = Ticket.objects.filter(
         service=service,
         ticket_date=today,
-        status='waiting'
+        status__in=['waiting', 'notified'] 
     ).order_by('queue_number').first()
-    
+
     if not next_ticket:
-        return Response({'success': False,'message': 'No tickets waiting in queue'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({
+            'success': False,
+            'message': 'No tickets waiting in queue'
+        }, status=status.HTTP_404_NOT_FOUND)
     
-    # Update ticket status
-    next_ticket.status = 'notified'
-    next_ticket.called_by = request.user
-    next_ticket.called_at = timezone.now()
-    next_ticket.save()
+    #Use transaction to ensure data consistency
+    from django.db import transaction
+
+    with transaction.atomic():
+        # If there's already a ticket being served at this window, complete it first
+        current_serving = Ticket.objects.filter(
+            assigned_window=window,
+            status='serving'
+        ).first()
+        
+        if current_serving:
+            current_serving.status = 'served'
+            current_serving.served_by = request.user
+            current_serving.served_at = timezone.now()
+            current_serving.save()
+        
+        # Update the new ticket
+        next_ticket.status = 'serving'  # Direct to serving, skip notified if you want
+        next_ticket.called_by = request.user
+        next_ticket.called_at = timezone.now()
+        next_ticket.assigned_window = window
+        next_ticket.save()
     
-    return Response({'success': True,'message': f'Ticket {next_ticket.display_number} called','ticket': TicketSerializer(next_ticket).data})
+    # Prepare response with queue information
+    waiting_count = Ticket.objects.filter(
+        service=service,
+        ticket_date=today,
+        status='waiting'
+    ).count()
+    
+    return Response({
+        'success': True,
+        'message': f'Now serving {next_ticket.display_number} at {window.name}',
+        'ticket': {
+            'ticket_id': next_ticket.ticket_id,
+            'display_number': next_ticket.display_number,
+            'queue_number': next_ticket.queue_number,
+            'status': next_ticket.status,
+            'people_ahead': next_ticket.people_ahead
+        },
+        'window': {
+            'id': window.id,
+            'name': window.name,
+            'number': window.window_number
+        },
+        'queue_info': {
+            'waiting_count': waiting_count,
+            'next_waiting': Ticket.objects.filter(
+                service=service, 
+                ticket_date=today, 
+                status='waiting'
+            ).order_by('queue_number').first().display_number if waiting_count > 0 else None
+        }
+    })
 
 
 @extend_schema(
