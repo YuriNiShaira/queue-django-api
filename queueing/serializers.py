@@ -18,33 +18,37 @@ class ServiceWindowSerializer(serializers.ModelSerializer):
         read_only_fields = ['id', 'created_at', 'updated_at']
 
 class ServiceSerializer(serializers.ModelSerializer):
+    windows_count = serializers.IntegerField(read_only=True)
     waiting_count = serializers.IntegerField(read_only=True)
     currently_serving = serializers.SerializerMethodField()
-    windows = ServiceWindowSerializer(many=True, read_only=True)
-    windows_count = serializers.IntegerField(source='windows.count', read_only=True)
-    
+
     class Meta:
         model = Service
         fields = [
-            'id', 'name', 'description', 'prefix',
-            'is_active', 'average_service_time',
-            'current_queue_number', 'waiting_count',
-            'currently_serving', 'windows', 'windows_count',
-            'created_at', 'updated_at'
+            'id',
+            'name',
+            'description',
+            'prefix',
+            'is_active',
+            'average_service_time',
+            'windows_count',
+            'waiting_count',
+            'currently_serving',
+            'created_at',
+            'updated_at',
         ]
-        read_only_fields = ['id', 'current_queue_number', 'created_at', 'updated_at']
-    
+        read_only_fields = [
+            'id',
+            'windows_count',
+            'waiting_count',
+            'currently_serving',
+            'created_at',
+            'updated_at',
+        ]
+
     def get_currently_serving(self, obj):
         serving = obj.currently_serving
-        if serving:
-            from .serializers import ServiceWindowSerializer 
-            return {
-                'ticket_id': str(serving.ticket_id),
-                'display_number': serving.display_number,
-                'queue_number': serving.queue_number,
-                'assigned_window': ServiceWindowSerializer(serving.assigned_window).data if serving.assigned_window else None
-            }
-        return None
+        return serving.display_number if serving else None
 
 class TicketSerializer(serializers.ModelSerializer):
     display_number = serializers.CharField(read_only=True)
