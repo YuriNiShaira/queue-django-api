@@ -1,16 +1,15 @@
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
+from datetime import timezone
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
 from drf_spectacular.utils import extend_schema, OpenApiExample, OpenApiResponse
 from drf_spectacular.types import OpenApiTypes
 from django.contrib.auth import authenticate, logout
 from django.contrib.auth.models import User
-from .auth_serializers import (
-    UserSerializer, LoginSerializer, 
-    RegisterStaffSerializer, ChangePasswordSerializer
-)
+from .auth_serializers import (UserSerializer, LoginSerializer, RegisterStaffSerializer, ChangePasswordSerializer)
 from .authentication import set_jwt_cookies, delete_jwt_cookies
+from .serializers import ServiceWindowSerializer
 
 @extend_schema(
     tags=['Authentication'],
@@ -79,9 +78,23 @@ def login_view(request):
             if not user.is_active:
                 return Response({'success': False, 'message':'Account is disabled'}, status=status.HTTP_400_BAD_REQUEST)
             
+            # NEW: Update last login for staff profile
+            if hasattr(user, 'staff_profile'):
+                user.staff_profile.last_login_at = timezone.now()
+                user.staff_profile.save()
+            
             user_data = UserSerializer(user).data
             response = Response({'success': True, 'message': 'Login Successfully', 'user':user_data})
             response = set_jwt_cookies(response, user)
+            
+            # NEW: Add flag if window selection is needed
+            if hasattr(user, 'staff_profile') and user.staff_profile.assigned_service:
+                response.data['requires_window_selection'] = True
+                response.data['available_windows'] = ServiceWindowSerializer(
+                    user.staff_profile.assigned_service.windows.filter(status='active'),
+                    many=True
+                ).data
+            
             return response
         else:
             return Response({'success': False, 'message':'Invalid Data', 'errors': serializer.errors}, status=400)
