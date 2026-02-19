@@ -18,4 +18,5 @@ urlpatterns = [
     path('admin/staff/list/', auth_views.list_staff_view, name='list-staff'),
     path('admin/staff/<int:user_id>/delete/', auth_views.delete_staff_view, name='delete-staff'),
     path('admin/staff/<int:user_id>/update/', auth_views.update_staff_view, name='update-staff'),
+    path('admin/staff/<int:user_id>/assign-service/', auth_views.assign_staff_to_service, name='assign-staff-service'),
 ]
