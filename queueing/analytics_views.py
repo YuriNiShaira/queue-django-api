@@ -99,3 +99,57 @@ def admin_analytics(request):
         }
     })
 
+
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def service_analytics(request, service_id):
+    #Get detailed analytics for a specific service
+    try:
+        service = Service.objects.get(id=service_id)
+    except Service.DoesNotExist:
+        return Response({'success': False, 'message': 'Service not found'}, status=404)
+    
+    today = timezone.now().date()
+    week_ago = today - timedelta(days=7)
+
+    # Last 7 days data
+    daily_stats = []
+
+    for i in range(7):
+        day = today - timedelta(days=i)
+        day_tickets = Ticket.objects.filter(service=service, ticket_date=day)
+
+        daily_stats.append({
+            'date': day,
+            'total': day_tickets.count(),
+            'served': day_tickets.filter(status='served').count(),
+            'cancelled': day_tickets.filter(status='cancelled').count()
+        })
+
+    # Window performance
+    window_stats = []
+    for window in service.windows.all():
+        window_tickets = Ticket.objects.filter(assigned_window=window, ticket_date=today)
+
+        window_stats.append({
+            'window_id': window.id,
+            'window_name': window.name,
+            'tickets_served': window_tickets.filter(status='served').count(),
+            'currently_serving': window_tickets.filter(status='serving').exists()
+        })
+
+    
+    return Response({
+        'success': True,
+        'analytics': {
+            'service': {
+                'id': service.id,
+                'name': service.name,
+                'prefix': service.prefix
+            },
+            'daily_stats': daily_stats,
+            'window_performance': window_stats,
+            'average_service_time': service.average_service_time,
+            'total_waiting_today': service.waiting_count
+        }
+    })
