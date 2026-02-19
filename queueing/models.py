@@ -26,7 +26,6 @@ class Service(models.Model):
     def __str__(self):
         return self.name
 
-    # 🔥 NEW SAFE VERSION
     def get_next_queue_number(self):
         today = timezone.now().date()
 
@@ -73,13 +72,7 @@ class ServiceWindow(models.Model):
     status = models.CharField(max_length=20, choices=WINDOW_STATUS, default='active')
     description = models.TextField(blank=True)
 
-    current_staff = models.ForeignKey(
-        User,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='assigned_window'
-    )
+    current_staff = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_window')
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -122,7 +115,6 @@ class StaffProfile(models.Model):
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='staff')
     assigned_service = models.ForeignKey(Service, on_delete=models.SET_NULL, null=True, blank=True)
     can_manage_queue = models.BooleanField(default=True)
-    current_window = models.ForeignKey(ServiceWindow, on_delete=models.SET_NULL, null=True, blank=True, related_name='currently_manning_staff') 
 
     last_login_at = models.DateTimeField(null=True, blank=True)
     last_logout_at = models.DateTimeField(null=True, blank=True)
