@@ -7,7 +7,7 @@ from drf_spectacular.utils import extend_schema, OpenApiExample, OpenApiResponse
 from drf_spectacular.types import OpenApiTypes
 from django.contrib.auth import authenticate, logout
 from django.contrib.auth.models import User
-from .auth_serializers import (UserSerializer, LoginSerializer, RegisterStaffSerializer, ChangePasswordSerializer)
+from .auth_serializers import (UserSerializer, LoginSerializer, RegisterStaffSerializer, ChangePasswordSerializer, CreateAdminSerializer)
 from .authentication import set_jwt_cookies, delete_jwt_cookies
 from .serializers import ServiceWindowSerializer
 from . models import Service, StaffProfile
@@ -582,3 +582,145 @@ def assign_staff_to_service(request, user_id):
         return Response({'success': False, 'message': 'User not found'}, status=404)
     except Service.DoesNotExist:
         return Response({'success': False, 'message': 'Service not found'}, status=404)
+
+
+@extend_schema(
+    tags=['Admin'],
+    summary='Create Admin Account (Admin only)',
+    description="""Create another admin user. 
+    👑 **Permission:** Only existing admins can create new admins""",
+    request=CreateAdminSerializer,
+    responses={
+        201: OpenApiResponse(
+            description="Admin created",
+            examples=[
+                OpenApiExample(
+                    'Success Response',
+                    value={
+                        'success': True,
+                        'message': 'Admin account created for new_admin',
+                        'user': {
+                            'id': 5,
+                            'username': 'new_admin',
+                            'email': 'newadmin@school.edu',
+                            'is_staff': True,
+                            'is_superuser': True
+                        }
+                    }
+                )
+            ]
+        ),
+        400: OpenApiResponse(description="Creation failed"),
+        403: OpenApiResponse(description="Not an admin")
+    }
+)
+@api_view(['POST'])
+@permission_classes([IsAdminUser]) 
+def create_admin_view(request):
+    serializer = CreateAdminSerializer(data=request.data)
+
+    if serializer.is_valid():
+        user = serializer.save()
+        return Response({
+            'success': True,
+            'message': f'Admin account created for {user.username}',
+            'user': {
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'first_name': user.first_name,
+                'last_name': user.last_name,
+                'is_staff': user.is_staff,
+                'is_superuser': user.is_superuser
+            }
+        }, status=status.HTTP_201_CREATED)
+
+    return Response({'success': False, 'message':'Failed to create admin', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
+@extend_schema(
+    tags=['Admin'],
+    summary='List All Admins',
+    description="Get list of all admin users",
+    responses={
+        200: OpenApiResponse(description="List of admins")
+    }
+)
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def list_admins_view(request):
+    admins = User.objects.filter(is_superuser=True).exclude(id=request.user.id)
+
+    admin_list = []
+    for admin in admins:
+        admin_list.append({
+            'id': admin.id,
+            'username': admin.username,
+            'email': admin.email,
+            'first_name': admin.first_name,
+            'last_name': admin.last_name,
+            'last_login': admin.last_login,
+            'date_joined': admin.date_joined,
+            'is_active': admin.is_active
+        })
+
+    return Response({'success': True,'count': len(admin_list),'admins': admin_list})
+
+@extend_schema(
+    tags=['Admin'],
+    summary='Delete Admin Account',
+    description="Delete an admin user (cannot delete yourself)",
+    responses={
+        200: OpenApiResponse(description="Admin deleted"),
+        400: OpenApiResponse(description="Cannot delete yourself"),
+        404: OpenApiResponse(description="Admin not found")
+    }
+)
+@api_view(['DELETE'])
+@permission_classes([IsAdminUser])
+def delete_admin_view(request, user_id):
+    try:
+        if request.user.id == user_id:
+            return Response({'success': False,'message': 'Cannot delete your own account'}, status=status.HTTP_400_BAD_REQUEST)
+        
+        user = User.objects.get(id=user_id, is_superuser=True)
+        username = user.username
+        user.delete()
+        
+        return Response({'success': True,'message': f'Admin account {username} deleted'})
+        
+    except User.DoesNotExist:
+        return Response({'success': False,'message': 'Admin user not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+
+@extend_schema(
+    tags=['Admin'],
+    summary='Update Admin Account',
+    description="Update admin user information (cannot change password here)",
+    responses={
+        200: OpenApiResponse(description="Admin updated"),
+        404: OpenApiResponse(description="Admin not found")
+    }
+)
+@api_view(['PUT', 'PATCH'])
+@permission_classes([IsAdminUser])
+def update_admin_view(request, user_id):
+    try:
+        user = User.objects.get(id=user_id, is_superuser=True)
+        # Don't allow password update here
+        data = request.data.copy()
+        if 'password' in data:
+            data.pop('password')
+        if 'password2' in data:
+            data.pop('password2')
+
+        serializer = UserSerializer(user, data=data, partial=True)
+
+        if serializer.is_valid():
+            serializer.save()
+            return Response({'success': True,'message': f'Admin account {user.username} updated','user': serializer.data})
+        
+        return Response({'success': False,'message': 'Invalid data','errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+    
+    except User.DoesNotExist:
+        return Response({'success':False, 'message':'Admin not found'}, status=404)
+
