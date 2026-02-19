@@ -53,6 +53,7 @@ admin.site.register(User, UserAdmin)
 @admin.register(Service)
 class ServiceAdmin(admin.ModelAdmin):
     list_display = (
+        'id',
         'name',
         'prefix',
         'is_active',
