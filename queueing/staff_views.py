@@ -4,7 +4,7 @@ from rest_framework.response import Response
 from rest_framework import status
 from django.utils import timezone
 from .models import Service, Ticket
-from .serializers import TicketSerializer, ServiceSerializer
+from .serializers import TicketSerializer, ServiceSerializer, ServiceWindowSerializer
 from .permissions import IsServiceStaff, HasServicePermission
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
@@ -18,51 +18,41 @@ from drf_spectacular.types import OpenApiTypes
 @api_view(['GET'])
 @permission_classes([IsServiceStaff])
 def staff_dashboard(request):
-    #Get staff dashboard for assigned service
+    """Simple dashboard for staff - just show queue for their service"""
+    if not hasattr(request.user, 'staff_profile'):
+        return Response({'success': False, 'message': 'Not staff'}, status=403)
+    
     staff_profile = request.user.staff_profile
     service = staff_profile.assigned_service
     
     if not service:
-        return Response({'success': False,'message': 'No service assigned to your account'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'success': False, 'message': 'No service assigned'}, status=400)
     
     today = timezone.now().date()
     
-    # Get queue data
-    tickets_today = service.tickets.filter(ticket_date=today).order_by('queue_number')
+    # Get queue
+    waiting = Ticket.objects.filter(
+        service=service,
+        ticket_date=today,
+        status='waiting'
+    ).order_by('queue_number')
     
-    # Get tickets by status
-    waiting = tickets_today.filter(status='waiting')
-    notified = tickets_today.filter(status='notified')
-    serving = tickets_today.filter(status='serving')
-    served_recent = tickets_today.filter(status='served').order_by('-served_at')[:10]
-    
-    # Get service windows
-    windows = service.windows.filter(status='active')
-    
-    # Get currently serving per window
-    window_status = []
-    for window in windows:
-        window_ticket = serving.filter(assigned_window=window).first()
-        window_status.append({'window_id': window.id,'window_name': window.name or f"Window {window.window_number}",'current_ticket': TicketSerializer(window_ticket).data if window_ticket else None})
+    serving = Ticket.objects.filter(
+        service=service,
+        ticket_date=today,
+        status='serving'
+    )
     
     return Response({
         'success': True,
         'dashboard': {
-            'service': ServiceSerializer(service).data,
-            'queue_stats': {
-                'waiting': waiting.count(),
-                'notified': notified.count(),
-                'serving': serving.count(),
-                'total_today': tickets_today.count(),
-                'next_ticket': waiting.first().display_number if waiting.exists() else None,
-            },
-            'current_queue': {
-                'waiting': TicketSerializer(waiting[:10], many=True).data,  # Next 10
-                'notified': TicketSerializer(notified, many=True).data,
-                'serving': TicketSerializer(serving, many=True).data,
-            },
-            'recent_served': TicketSerializer(served_recent, many=True).data,
-            'windows': window_status,
+            'service': service.name,
+            'waiting_count': waiting.count(),
+            'serving_count': serving.count(),
+            'next_ticket': waiting.first().display_number if waiting.exists() else None,
+            'currently_serving': TicketSerializer(serving, many=True).data,
+            'waiting_list': TicketSerializer(waiting[:10], many=True).data,
+            'windows': ServiceWindowSerializer(service.windows.filter(status='active'), many=True).data
         }
     })
 
@@ -75,92 +65,55 @@ def staff_dashboard(request):
 @api_view(['POST'])
 @permission_classes([IsServiceStaff])
 def call_next_ticket(request):
-    """Call the next waiting ticket"""
+    #Call the next waiting ticket
+
+    # Check if user has staff profile
     if not hasattr(request.user, 'staff_profile'):
         return Response({'success': False,'message': 'User is not a staff member'}, status=status.HTTP_403_FORBIDDEN)
     
     staff_profile = request.user.staff_profile
-
-     # Check if staff has selected a window
-    if not staff_profile.current_window:
-        return Response({'success': False,'message': 'Please select a window first'}, status=status.HTTP_400_BAD_REQUEST)
-    
     service = staff_profile.assigned_service
-    window = staff_profile.current_window
-
-    # Double-check window is active
-    if window.status != 'active':
-        return Response({'success': False,'message': f'Window {window.name} is not active'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    if not service:
+        return Response({'success': False,'message': 'No service assigned'}, status=400)
     
     today = timezone.now().date()
-
-    # Find next waiting ticket (priority: waiting -> notified)
-    # We check 'notified' first in case someone was called but not served
-
+    
+    # Find next waiting ticket
     next_ticket = Ticket.objects.filter(
         service=service,
         ticket_date=today,
-        status__in=['waiting', 'notified'] 
+        status='waiting'
     ).order_by('queue_number').first()
-
+    
     if not next_ticket:
         return Response({
             'success': False,
-            'message': 'No tickets waiting in queue'
-        }, status=status.HTTP_404_NOT_FOUND)
+            'message': 'No tickets waiting'
+        }, status=404)
     
-    #Use transaction to ensure data consistency
-    from django.db import transaction
-
-    with transaction.atomic():
-        # If there's already a ticket being served at this window, complete it first
-        current_serving = Ticket.objects.filter(
-            assigned_window=window,
-            status='serving'
-        ).first()
-        
-        if current_serving:
-            current_serving.status = 'served'
-            current_serving.served_by = request.user
-            current_serving.served_at = timezone.now()
-            current_serving.save()
-        
-        # Update the new ticket
-        next_ticket.status = 'serving'  # Direct to serving, skip notified if you want
-        next_ticket.called_by = request.user
-        next_ticket.called_at = timezone.now()
-        next_ticket.assigned_window = window
-        next_ticket.save()
+    # Find an available window for this service
+    available_window = service.windows.filter(
+        status='active'
+    ).first()  
     
-    # Prepare response with queue information
-    waiting_count = Ticket.objects.filter(
-        service=service,
-        ticket_date=today,
-        status='waiting'
-    ).count()
+    if not available_window:
+        return Response({'success': False,'message': 'No active windows available for this service'}, status=400)
+    
+    # Update ticket
+    next_ticket.status = 'serving'
+    next_ticket.called_by = request.user
+    next_ticket.called_at = timezone.now()
+    next_ticket.assigned_window = available_window
+    next_ticket.save()
     
     return Response({
         'success': True,
-        'message': f'Now serving {next_ticket.display_number} at {window.name}',
+        'message': f'Now serving {next_ticket.display_number}',
         'ticket': {
-            'ticket_id': next_ticket.ticket_id,
             'display_number': next_ticket.display_number,
-            'queue_number': next_ticket.queue_number,
-            'status': next_ticket.status,
+            'window': available_window.name,
             'people_ahead': next_ticket.people_ahead
-        },
-        'window': {
-            'id': window.id,
-            'name': window.name,
-            'number': window.window_number
-        },
-        'queue_info': {
-            'waiting_count': waiting_count,
-            'next_waiting': Ticket.objects.filter(
-                service=service, 
-                ticket_date=today, 
-                status='waiting'
-            ).order_by('queue_number').first().display_number if waiting_count > 0 else None
         }
     })
 
