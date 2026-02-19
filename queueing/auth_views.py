@@ -10,6 +10,7 @@ from django.contrib.auth.models import User
 from .auth_serializers import (UserSerializer, LoginSerializer, RegisterStaffSerializer, ChangePasswordSerializer)
 from .authentication import set_jwt_cookies, delete_jwt_cookies
 from .serializers import ServiceWindowSerializer
+from . models import Service, StaffProfile
 
 @extend_schema(
     tags=['Authentication'],
@@ -78,26 +79,22 @@ def login_view(request):
             if not user.is_active:
                 return Response({'success': False, 'message':'Account is disabled'}, status=status.HTTP_400_BAD_REQUEST)
             
-            # NEW: Update last login for staff profile
-            if hasattr(user, 'staff_profile'):
-                user.staff_profile.last_login_at = timezone.now()
-                user.staff_profile.save()
-            
             user_data = UserSerializer(user).data
-            response = Response({'success': True, 'message': 'Login Successfully', 'user':user_data})
+            response = Response({'success': True, 'message': 'Login Successfully', 'user': user_data})
             response = set_jwt_cookies(response, user)
             
-            # NEW: Add flag if window selection is needed
             if hasattr(user, 'staff_profile') and user.staff_profile.assigned_service:
-                response.data['requires_window_selection'] = True
-                response.data['available_windows'] = ServiceWindowSerializer(
-                    user.staff_profile.assigned_service.windows.filter(status='active'),
-                    many=True
-                ).data
+                service = user.staff_profile.assigned_service
+                response.data['service'] = {
+                    'id': service.id,
+                    'name': service.name,
+                    'prefix': service.prefix,
+                    'windows': ServiceWindowSerializer(service.windows.filter(status='active'), many=True).data
+                }
             
             return response
         else:
-            return Response({'success': False, 'message':'Invalid Data', 'errors': serializer.errors}, status=400)
+            return Response({'success': False, 'message': 'Invalid credentials'}, status=400)
 
 
 @extend_schema(
@@ -518,3 +515,70 @@ def update_staff_view(request, user_id):
         return Response({'success':False, 'message':'Invalid data', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
     except User.DoesNotExist:
         return Response({'success': False, 'message':'Staff user not found'}, status=status.HTTP_404_NOT_FOUND)
+    
+
+@extend_schema(
+    tags=['Admin'],
+    summary='Assign staff to service (Admin only)',
+    description="Assign a staff user to a specific service. Only staff users can be assigned.",
+    request=None, 
+    responses={
+        200: OpenApiResponse(
+            description="Staff assigned successfully",
+            examples=[
+                OpenApiExample(
+                    'Success Response',
+                    value={
+                        'success': True,
+                        'message': 'john assigned to Registrar'
+                    }
+                )
+            ]
+        ),
+        404: OpenApiResponse(
+            description="User or Service not found",
+            examples=[
+                OpenApiExample(
+                    'User Not Found',
+                    value={
+                        'success': False,
+                        'message': 'User not found'
+                    }
+                ),
+                OpenApiExample(
+                    'Service Not Found',
+                    value={
+                        'success': False,
+                        'message': 'Service not found'
+                    }
+                )
+            ]
+        )
+    },
+    examples=[
+        OpenApiExample(
+            'Example Request',
+            value={'service_id': 1}
+        )
+    ]
+)
+@api_view(['POST'])
+@permission_classes([IsAdminUser])
+def assign_staff_to_service(request, user_id):
+    #Assign staff user to a service
+    service_id = request.data.get('service_id')
+    
+    try:
+        user = User.objects.get(id=user_id, is_staff=True)
+        service = Service.objects.get(id=service_id)
+        
+        profile, created = StaffProfile.objects.get_or_create(user=user)
+        profile.assigned_service = service
+        profile.role = 'staff'
+        profile.save()
+        
+        return Response({'success': True,'message': f'{user.username} assigned to {service.name}'})
+    except User.DoesNotExist:
+        return Response({'success': False, 'message': 'User not found'}, status=404)
+    except Service.DoesNotExist:
+        return Response({'success': False, 'message': 'Service not found'}, status=404)
