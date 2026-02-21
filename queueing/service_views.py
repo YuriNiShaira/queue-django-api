@@ -1,4 +1,3 @@
-# queueing/service_views.py
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
@@ -6,8 +5,7 @@ from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from time import timezone
 from .models import Service
 from .serializers import ServiceSerializer
-from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse, OpenApiExample
-from drf_spectacular.types import OpenApiTypes
+from drf_spectacular.utils import extend_schema
 
 @extend_schema(
     summary="Service List",

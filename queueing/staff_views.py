@@ -1,13 +1,11 @@
-# queueing/staff_dashboard_views.py
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
 from django.utils import timezone
-from .models import Service, Ticket
-from .serializers import TicketSerializer, ServiceSerializer, ServiceWindowSerializer
-from .permissions import IsServiceStaff, HasServicePermission
-from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse, OpenApiExample
-from drf_spectacular.types import OpenApiTypes
+from .models import Ticket
+from .serializers import TicketSerializer, ServiceWindowSerializer
+from .permissions import IsServiceStaff
+from drf_spectacular.utils import extend_schema
 
 
 @extend_schema(
