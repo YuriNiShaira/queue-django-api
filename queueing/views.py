@@ -5,7 +5,6 @@ from rest_framework.permissions import AllowAny, IsAuthenticated
 from django.utils import timezone
 from .models import Service, Ticket
 from .serializers import ServiceSerializer, TicketSerializer
-from .escpos_utils import MockPrinter
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
 
@@ -47,9 +46,6 @@ def generate_ticket(request):
     # Create ticket
     ticket = Ticket.objects.create(service=service)
     
-    # Generate printer data
-    print_result = MockPrinter.print_ticket(ticket, save_to_file=True)
-    
     # Prepare response
     response_data = {
         'success': True,
@@ -66,10 +62,6 @@ def generate_ticket(request):
             'wait_time_minutes': ticket.wait_time_minutes,
             'created_at': ticket.created_at.isoformat(),
         },
-        'printer_data': {
-            'success': print_result.get('success', True),
-            'preview_html': print_result.get('preview_html', ''),
-        }
     }
     
     return Response(response_data, status=status.HTTP_201_CREATED)
