@@ -316,9 +316,7 @@ def refresh_token_view(request):
 @extend_schema(
     tags=['Admin'],
     summary='Create staff account (Admin only)',
-    description="""Create new staff user. Requires admin privileges.  
-    👑 **Permission:** Only users with `is_staff=True` can access
-    """,
+    description="Create new staff user and assign to a service in one step.",
     request=RegisterStaffSerializer,
     responses={
         201: OpenApiResponse(
@@ -328,54 +326,22 @@ def refresh_token_view(request):
                     'Success Response',
                     value={
                         'success': True,
-                        'message': 'Staff account created for new_staff',
+                        'message': 'Staff account created for cashier_staff and assigned to Cashier',
                         'user': {
                             'id': 2,
-                            'username': 'new_staff',
-                            'is_staff': True,
-                            'is_active': True
+                            'username': 'cashier_staff',
+                            'is_staff': True
+                        },
+                        'assigned_service': {
+                            'id': 1,
+                            'name': 'Cashier',
+                            'prefix': 'C'
                         }
                     }
                 )
             ]
-        ),
-        400: OpenApiResponse(
-            description="Creation failed",
-            examples=[
-                OpenApiExample(
-                    'Validation Error',
-                    value={
-                        'success': False,
-                        'message': 'Account failed to create',
-                        'errors': {
-                            'username': ['This username already exists.']
-                        }
-                    }
-                )
-            ]
-        ),
-        403: OpenApiResponse(
-            description="Not an admin",
-            examples=[
-                OpenApiExample(
-                    'Forbidden',
-                    value={'detail': 'You do not have permission to perform this action.'}
-                )
-            ]
         )
-    },
-    examples=[
-        OpenApiExample(
-            'Example Request',
-            value={
-                'username': 'new_staff',
-                'email': 'staff@example.com',
-                'password': 'staffpass123',
-                'first_name': 'Jane',
-                'last_name': 'Smith'
-            }
-        )
-    ]
+    }
 )
 @api_view(['POST'])
 @permission_classes([IsAdminUser])
@@ -383,10 +349,29 @@ def create_staff_view(request):
     serializer = RegisterStaffSerializer(data=request.data)
     if serializer.is_valid():
         user = serializer.save()
-        user_data = {'id': user.id,'username': user.username,'is_staff': user.is_staff,'is_superuser': user.is_superuser}
-        return Response({'success': True, 'message': f'Staff account created for {user.username}', 'user': user_data}, status=status.HTTP_201_CREATED)
-    return Response({'success': False, 'message': 'Account failed to create', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
+        service = user.staff_profile.assigned_service
+        
+        user_data = {
+            'id': user.id,
+            'username': user.username,
+            'is_staff': user.is_staff
+        }
+        
+        service_data = {
+            'id': service.id,
+            'name': service.name,
+            'prefix': service.prefix
+        }
+        
+        return Response({
+            'success': True, 
+            'message': f'Staff account created for {user.username} and assigned to {service.name}', 
+            'user': user_data,
+            'assigned_service': service_data
+        }, status=status.HTTP_201_CREATED)
+    
+    return Response({'success': False, 'message': 'Account failed to create', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 @extend_schema(
     tags=['Admin'],
@@ -405,13 +390,11 @@ def create_staff_view(request):
                             {
                                 'id': 2,
                                 'username': 'staff1',
-                                'email': 'staff1@email.com',
                                 'is_staff': True
                             },
                             {
                                 'id': 3,
                                 'username': 'staff2',
-                                'email': 'staff2@email.com',
                                 'is_staff': True
                             }
                         ]

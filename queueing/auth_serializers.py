@@ -15,25 +15,38 @@ class LoginSerializer(serializers.Serializer):
                                      error_messages={'required': 'Password is required','blank': 'Password cannot be empty'})
 
 class RegisterStaffSerializer(serializers.ModelSerializer):
-    password = serializers.CharField(write_only = True, required=True, validators = [validate_password])
-    password2 = serializers.CharField(write_only = True, required=True)
+    password = serializers.CharField(write_only=True, required=True, validators=[validate_password])
+    password2 = serializers.CharField(write_only=True, required=True)
+    service_id = serializers.IntegerField(required=True, write_only=True) 
 
     class Meta:
         model = User
-        fields = ['username', 'password', 'password2']
-        
+        fields = ['username', 'password', 'password2', 'service_id']  
+
     def validate(self, attrs):
         if attrs['password'] != attrs['password2']:
-            raise serializers.ValidationError({"password": "Password don't match"})
+            raise serializers.ValidationError({"password": "Password fields didn't match."})
+        
+        from .models import Service
+        service_id = attrs.get('service_id')
+        if not Service.objects.filter(id=service_id).exists():
+            raise serializers.ValidationError({"service_id": "Service does not exist"})
+        
         return attrs
     
     def create(self, validated_data):
-        user = User.objects.create(
-            username=validated_data['username'],
-            is_staff=True
-        )
+        service_id = validated_data.pop('service_id')
+        validated_data.pop('password2')
+        
+        user = User.objects.create(username=validated_data['username'], is_staff=True)
         user.set_password(validated_data['password'])
         user.save()
+        
+        # Assign to service immediately
+        from .models import StaffProfile, Service
+        service = Service.objects.get(id=service_id)
+        StaffProfile.objects.create(user=user, assigned_service=service, role='staff', can_manage_queue=True)
+        
         return user
     
 class ChangePasswordSerializer(serializers.Serializer):
@@ -47,7 +60,6 @@ class ChangePasswordSerializer(serializers.Serializer):
         return attrs
 
 class CreateAdminSerializer(serializers.ModelSerializer):
-    email = serializers.EmailField(required=True,validators=[UniqueValidator(queryset=User.objects.all())])
     password = serializers.CharField(write_only=True, required=True, validators=[validate_password])
     password2 = serializers.CharField(write_only=True, required=True)
 
@@ -69,7 +81,6 @@ class CreateAdminSerializer(serializers.ModelSerializer):
         user.set_password(validated_data['password'])
         user.save()
 
-        # Create staff profile for admin
         from .models import StaffProfile
         StaffProfile.objects.create(
             user=user,
