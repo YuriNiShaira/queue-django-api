@@ -14,88 +14,106 @@ from . models import Service, StaffProfile
 
 @extend_schema(
     tags=['Authentication'],
-    summary='Login to get JWT tokens',
-    description="Login user and get JWT tokens in HTTP-only cookies.",
+    summary='User Login (JWT in HTTP-only cookies)',
+    description='Login user and get JWT tokens in HTTP-only cookies.',
     request=LoginSerializer,
     responses={
         200: OpenApiResponse(
-            response=OpenApiTypes.OBJECT,
-            description="✅ Login successful",
+            description="Login successful",
             examples=[
                 OpenApiExample(
-                    'Success Response',
+                    'Success - Admin',
                     value={
                         'success': True,
-                        'message': 'Login Successfully',
+                        'role': 'admin',
                         'user': {
                             'id': 1,
-                            'username': 'john',
-                            'email': 'john@email.com',
-                            'is_staff': False
+                            'username': 'admin',
+                            'is_staff': True,
+                            'is_superuser': True
+                        }
+                    }
+                ),
+                OpenApiExample(
+                    'Success - Staff',
+                    value={
+                        'success': True,
+                        'role': 'staff',
+                        'user': {
+                            'id': 2,
+                            'username': 'cashier_staff'
+                        },
+                        'service': {
+                            'id': 1,
+                            'name': 'Cashier',
+                            'windows': [
+                                {
+                                    'id': 6,
+                                    'window_number': 6,
+                                    'status': 'active'
+                                }
+                            ]
                         }
                     }
                 )
             ]
         ),
-        400: OpenApiResponse(
-            response=OpenApiTypes.OBJECT,
-            description="❌ Login failed",
-            examples=[
-                OpenApiExample(
-                    'Wrong Password',
-                    value={
-                        'success': False,
-                        'message': 'Invalid Data',
-                        'errors': {'non_field_errors': ['Invalid credentials']}
-                    }
-                ),
-                OpenApiExample(
-                    'Disabled Account',
-                    value={
-                        'success': False,
-                        'message': 'Account is disabled'
-                    }
-                )
-            ]
-        )
-    },
-    examples=[
-        OpenApiExample(
-            'Example Request',
-            value={'username': 'testuser', 'password': 'testpass123'}
-        )
-    ]
+        400: OpenApiResponse(description="Invalid input"),
+        401: OpenApiResponse(description="Invalid credentials or inactive account"),
+        500: OpenApiResponse(description="Server error")
+    }
 )
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def login_view(request):
-    serializer = LoginSerializer(data=request.data)
-    if serializer.is_valid():
+    try:
+        serializer = LoginSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response({'success': False,'message': 'Validation failed','errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+        
         username = serializer.validated_data['username']
         password = serializer.validated_data['password']
+        
         user = authenticate(request, username=username, password=password)
 
-        if user is not None:
-            if not user.is_active:
-                return Response({'success': False, 'message':'Account is disabled'}, status=status.HTTP_400_BAD_REQUEST)
-            
-            user_data = UserSerializer(user).data
-            response = Response({'success': True, 'message': 'Login Successfully', 'user': user_data})
-            response = set_jwt_cookies(response, user)
-            
-            if hasattr(user, 'staff_profile') and user.staff_profile.assigned_service:
-                service = user.staff_profile.assigned_service
-                response.data['service'] = {
+        if user is None:
+            return Response({'success': False,'message': 'Invalid username or password'}, status=status.HTTP_401_UNAUTHORIZED)
+        
+        user_data = {
+            'id': user.id,
+            'username': user.username,
+            'is_staff': user.is_staff,
+            'is_superuser': user.is_superuser
+        }
+        
+        if user.is_superuser:
+            role = 'admin'
+        else:
+            role = 'staff' 
+        
+        response_data = {
+            'success': True,
+            'message': 'Login successful',
+            'role': role,
+            'user': user_data
+        }
+        
+        if role == 'staff' and hasattr(user, 'staff_profile'):
+            service = user.staff_profile.assigned_service
+            if service:
+                response_data['service'] = {
                     'id': service.id,
                     'name': service.name,
                     'prefix': service.prefix,
-                    'windows': ServiceWindowSerializer(service.windows.filter(status='active'), many=True).data
-                }
-            
-            return response
-        else:
-            return Response({'success': False, 'message': 'Invalid credentials'}, status=400)
-
+                    'windows': ServiceWindowSerializer(service.windows.filter(status='active'), many=True).data}
+        
+        response = Response(response_data, status=status.HTTP_200_OK)
+        response = set_jwt_cookies(response, user)
+        return response
+        
+    except Exception as e:
+        print(f"Login error: {str(e)}") 
+        return Response({'success': False,'message': 'An unexpected error occurred. Please try again later.'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 @extend_schema(
     tags=['Authentication'],
@@ -197,28 +215,28 @@ def change_password_view(request):
             description="✅ User information",
             examples=[
                 OpenApiExample(
-                    'Success Response',
+                    'Admin User',
                     value={
                         'success': True,
                         'user': {
                             'id': 1,
-                            'username': 'john',
-                            'email': 'john@email.com',
-                            'first_name': 'John',
-                            'last_name': 'Doe',
+                            'username': 'admin',
                             'is_staff': True,
-                            'is_active': True
+                            'is_superuser': True
                         }
                     }
-                )
-            ]
-        ),
-        401: OpenApiResponse(
-            description="❌ Not logged in",
-            examples=[
+                ),
                 OpenApiExample(
-                    'Unauthorized',
-                    value={'detail': 'Authentication credentials were not provided.'}
+                    'Staff User',
+                    value={
+                        'success': True,
+                        'user': {
+                            'id': 2,
+                            'username': 'cashier_staff',
+                            'is_staff': True,
+                            'is_superuser': False
+                        }
+                    }
                 )
             ]
         )
@@ -228,8 +246,14 @@ def change_password_view(request):
 @permission_classes([IsAuthenticated])
 def current_user_view(request):
     user = request.user
-    serializer = UserSerializer(user)
-    return Response({'success': True, 'user': serializer.data})
+    user_data = {
+        'id': user.id,
+        'username': user.username,
+        'is_staff': user.is_staff,
+        'is_superuser': user.is_superuser
+    }
+    return Response({'success': True, 'user': user_data})
+
 
 
 @extend_schema(
@@ -308,7 +332,6 @@ def refresh_token_view(request):
                         'user': {
                             'id': 2,
                             'username': 'new_staff',
-                            'email': 'staff@email.com',
                             'is_staff': True,
                             'is_active': True
                         }
@@ -360,7 +383,8 @@ def create_staff_view(request):
     serializer = RegisterStaffSerializer(data=request.data)
     if serializer.is_valid():
         user = serializer.save()
-        return Response({'success': True, 'message': f'Staff account created for {user.username}', 'user': UserSerializer(user).data}, status=status.HTTP_201_CREATED)
+        user_data = {'id': user.id,'username': user.username,'is_staff': user.is_staff,'is_superuser': user.is_superuser}
+        return Response({'success': True, 'message': f'Staff account created for {user.username}', 'user': user_data}, status=status.HTTP_201_CREATED)
     return Response({'success': False, 'message': 'Account failed to create', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 
@@ -587,8 +611,7 @@ def assign_staff_to_service(request, user_id):
 @extend_schema(
     tags=['Admin'],
     summary='Create Admin Account (Admin only)',
-    description="""Create another admin user. 
-    👑 **Permission:** Only existing admins can create new admins""",
+    description="Create another admin user. Only username and password required.",
     request=CreateAdminSerializer,
     responses={
         201: OpenApiResponse(
@@ -602,47 +625,56 @@ def assign_staff_to_service(request, user_id):
                         'user': {
                             'id': 5,
                             'username': 'new_admin',
-                            'email': 'newadmin@school.edu',
                             'is_staff': True,
                             'is_superuser': True
                         }
                     }
                 )
             ]
-        ),
-        400: OpenApiResponse(description="Creation failed"),
-        403: OpenApiResponse(description="Not an admin")
+        )
     }
 )
 @api_view(['POST'])
-@permission_classes([IsAdminUser]) 
+@permission_classes([IsAdminUser])
 def create_admin_view(request):
     serializer = CreateAdminSerializer(data=request.data)
-
     if serializer.is_valid():
         user = serializer.save()
-        return Response({
-            'success': True,
-            'message': f'Admin account created for {user.username}',
-            'user': {
-                'id': user.id,
-                'username': user.username,
-                'email': user.email,
-                'first_name': user.first_name,
-                'last_name': user.last_name,
-                'is_staff': user.is_staff,
-                'is_superuser': user.is_superuser
-            }
-        }, status=status.HTTP_201_CREATED)
+        user_data = {'id': user.id,'username': user.username,'is_staff': user.is_staff,'is_superuser': user.is_superuser}
+        return Response({'success': True,'message': f'Admin account created for {user.username}','user': user_data}, status=status.HTTP_201_CREATED)
+    
+    return Response({'success': False,'message': 'Failed to create admin','errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
-    return Response({'success': False, 'message':'Failed to create admin', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 @extend_schema(
     tags=['Admin'],
     summary='List All Admins',
     description="Get list of all admin users",
     responses={
-        200: OpenApiResponse(description="List of admins")
+        200: OpenApiResponse(
+            description="List of admins",
+            examples=[
+                OpenApiExample(
+                    'Success Response',
+                    value={
+                        'success': True,
+                        'count': 2,
+                        'admins': [
+                            {
+                                'id': 1,
+                                'username': 'admin',
+                                'is_active': True
+                            },
+                            {
+                                'id': 5,
+                                'username': 'new_admin',
+                                'is_active': True
+                            }
+                        ]
+                    }
+                )
+            ]
+        )
     }
 )
 @api_view(['GET'])
@@ -652,17 +684,7 @@ def list_admins_view(request):
 
     admin_list = []
     for admin in admins:
-        admin_list.append({
-            'id': admin.id,
-            'username': admin.username,
-            'email': admin.email,
-            'first_name': admin.first_name,
-            'last_name': admin.last_name,
-            'last_login': admin.last_login,
-            'date_joined': admin.date_joined,
-            'is_active': admin.is_active
-        })
-
+        admin_list.append({'id': admin.id,'username': admin.username,'is_active': admin.is_active})
     return Response({'success': True,'count': len(admin_list),'admins': admin_list})
 
 @extend_schema(
