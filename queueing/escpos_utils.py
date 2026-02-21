@@ -1,4 +1,5 @@
-"""
+'''
+""
 ESC/POS thermal printer utilities using python-escpos library
 UPDATED: Compatible with current Ticket model structure
 """
@@ -248,3 +249,4 @@ Ticket ID: {ticket.ticket_id}
 ================
 """
             }
+        '''
