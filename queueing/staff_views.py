@@ -57,7 +57,7 @@ def staff_dashboard(request):
 
 @extend_schema(
     summary="Call Next Ticket",
-    description="Call the next waiting ticket to the staff's current window",
+    description="Call the next waiting ticket. Auto-completes any currently serving ticket.",
     tags=['Staff Queue Management']
 )
 @api_view(['POST'])
@@ -77,43 +77,84 @@ def call_next_ticket(request):
     
     today = timezone.now().date()
     
-    # Find next waiting ticket
-    next_ticket = Ticket.objects.filter(
-        service=service,
-        ticket_date=today,
-        status='waiting'
-    ).order_by('queue_number').first()
-    
-    if not next_ticket:
-        return Response({
-            'success': False,
-            'message': 'No tickets waiting'
-        }, status=404)
-    
-    # Find an available window for this service
-    available_window = service.windows.filter(
-        status='active'
-    ).first()  
-    
-    if not available_window:
-        return Response({'success': False,'message': 'No active windows available for this service'}, status=400)
-    
-    # Update ticket
-    next_ticket.status = 'serving'
-    next_ticket.called_by = request.user
-    next_ticket.called_at = timezone.now()
-    next_ticket.assigned_window = available_window
-    next_ticket.save()
-    
+    from django.db import transaction
+    # STEP 1: Check if there's a currently serving ticket and auto-complete it
+    with transaction.atomic():
+        current_serving = Ticket.objects.filter(
+            service=service,
+            ticket_date=today,
+            status='serving'
+        ).select_for_update().first()
+
+        if current_serving:
+            current_serving.status = 'served'
+            current_serving.served_by = request.user
+            current_serving.served_at = timezone.now()
+            current_serving.save()
+            completed_ticket = current_serving.display_number
+        else:
+            completed_ticket = None
+
+        # STEP 2: Find next waiting ticket
+        next_ticket = Ticket.objects.filter(
+            service=service,
+            ticket_date=today,
+            status='waiting'
+        ).select_for_update().order_by('queue_number').first()
+
+        if not next_ticket:
+            message = 'No tickets waiting in queue'
+            if completed_ticket:
+                message = f'Ticket {completed_ticket} completed. No more tickets waiting.'
+
+            return Response({'success': False, 'message': message}, status=status.HTTP_404_NOT_FOUND)
+        
+        # STEP 3: Find an available window for this service
+        available_window = service.windows.filter(status='active').first()
+
+        if not available_window:
+            return Response({'success': False, 'message': 'No active windows available for this service'}, status=400)
+        
+        # STEP 4: Update next ticket to serving
+        next_ticket.status = 'serving'
+        next_ticket.called_by = request.user
+        next_ticket.called_at = timezone.now()
+        next_ticket.assigned_window = available_window
+        next_ticket.save()
+
+        # STEP 5: Get queue info for response
+        waiting_count = Ticket.objects.filter(service=service, ticket_date=today, status='waiting').count()
+
+        next_waiting = Ticket.objects.filter(service=service, ticket_date=today, status='waiting').order_by('queue_number').first()
+
+    if completed_ticket:
+        message = f'Ticket {completed_ticket} completed. Now serving {next_ticket.display_number}'
+    else:
+        message = f'Now serving {next_ticket.display_number}'
+
     return Response({
         'success': True,
-        'message': f'Now serving {next_ticket.display_number}',
+        'message': message,
         'ticket': {
+            'ticket_id': next_ticket.ticket_id,
             'display_number': next_ticket.display_number,
-            'window': available_window.name,
+            'queue_number': next_ticket.queue_number,
+            'status': next_ticket.status,
             'people_ahead': next_ticket.people_ahead
+        },
+        'completed_ticket': completed_ticket,
+        'window': {
+            'id': available_window.id,
+            'name': available_window.name,
+            'number': available_window.window_number
+        },
+        'queue_info': {
+            'waiting_count': waiting_count,
+            'next_waiting': next_waiting.display_number if next_waiting else None
         }
     })
+
+
 
 
 @extend_schema(
@@ -188,20 +229,19 @@ def start_serving(request, ticket_id):
 
 
 @extend_schema(
-    summary="queue management",
-    description="Staff operations for managing queues",
+    summary="Complete Serving",
+    description="Manually mark a ticket as served",
     tags=['Staff Queue Management']
 )
 @api_view(['POST'])
 @permission_classes([IsServiceStaff])
 def complete_serving(request, ticket_id):
-    #Mark ticket as served/completed
+    #Manually mark a ticket as served
     try:
         ticket = Ticket.objects.get(ticket_id=ticket_id)
         
-        # Check permission
         if ticket.service != request.user.staff_profile.assigned_service:
-            return Response({'success': False,'message': 'You do not have permission to serve tickets from this service'}, status=status.HTTP_403_FORBIDDEN)
+            return Response({'success': False, 'message': 'You do not have permission to serve tickets from this service'}, status=status.HTTP_403_FORBIDDEN)
         
         if ticket.status != 'serving':
             return Response({'success': False,'message': f'Ticket must be in "serving" status. Current: {ticket.status}'}, status=status.HTTP_400_BAD_REQUEST)
@@ -212,7 +252,15 @@ def complete_serving(request, ticket_id):
         ticket.served_at = timezone.now()
         ticket.save()
         
-        return Response({'success': True,'message': f'Ticket {ticket.display_number} marked as served','ticket': TicketSerializer(ticket).data})
+        return Response({
+            'success': True,
+            'message': f'Ticket {ticket.display_number} marked as served',
+            'ticket': {
+                'ticket_id': ticket.ticket_id,
+                'display_number': ticket.display_number,
+                'status': ticket.status
+            }
+        })
         
     except Ticket.DoesNotExist:
         return Response({'success': False,'message': 'Ticket not found'}, status=status.HTTP_404_NOT_FOUND)
