@@ -2,7 +2,7 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
 from django.utils import timezone
-from .models import Ticket
+from .models import Ticket, ServiceWindow
 from .serializers import TicketSerializer, ServiceWindowSerializer
 from .permissions import IsServiceStaff
 from drf_spectacular.utils import extend_schema
@@ -57,7 +57,7 @@ def staff_dashboard(request):
 
 @extend_schema(
     summary="Call Next Ticket",
-    description="Call the next waiting ticket. Auto-completes any currently serving ticket.",
+    description="Call the next waiting ticket to a specific window. Auto-completes any ticket currently at that window.",
     tags=['Staff Queue Management']
 )
 @api_view(['POST'])
@@ -75,13 +75,24 @@ def call_next_ticket(request):
     if not service:
         return Response({'success': False,'message': 'No service assigned'}, status=400)
     
+    window_id = request.data.get('window_id')
+    if not window_id:
+        return Response({'success': False,'message': 'window_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
+    try:
+        window = ServiceWindow.objects.get(id=window_id, service=service, status='active')
+    except ServiceWindow.DoesNotExist:
+        return Response({'success': False, 'message': 'Window not found or inactive'}, status=status.HTTP_404_NOT_FOUND)
+        
+    
     today = timezone.now().date()
     
     from django.db import transaction
-    # STEP 1: Check if there's a currently serving ticket and auto-complete it
+    # STEP 1: Check if this window is already serving a ticket
     with transaction.atomic():
         current_serving = Ticket.objects.filter(
             service=service,
+            assigned_window=window,
             ticket_date=today,
             status='serving'
         ).select_for_update().first()
@@ -105,32 +116,26 @@ def call_next_ticket(request):
         if not next_ticket:
             message = 'No tickets waiting in queue'
             if completed_ticket:
-                message = f'Ticket {completed_ticket} completed. No more tickets waiting.'
+                message = f'Ticket {completed_ticket} completed at {window.name}. No more tickets waiting.'
 
             return Response({'success': False, 'message': message}, status=status.HTTP_404_NOT_FOUND)
         
-        # STEP 3: Find an available window for this service
-        available_window = service.windows.filter(status='active').first()
-
-        if not available_window:
-            return Response({'success': False, 'message': 'No active windows available for this service'}, status=400)
-        
-        # STEP 4: Update next ticket to serving
+        # STEP 3: Assign next ticket to this window
         next_ticket.status = 'serving'
         next_ticket.called_by = request.user
         next_ticket.called_at = timezone.now()
-        next_ticket.assigned_window = available_window
+        next_ticket.assigned_window = window  # Assign to specific window
         next_ticket.save()
 
-        # STEP 5: Get queue info for response
+        # STEP 4: Get queue info for response
         waiting_count = Ticket.objects.filter(service=service, ticket_date=today, status='waiting').count()
 
         next_waiting = Ticket.objects.filter(service=service, ticket_date=today, status='waiting').order_by('queue_number').first()
 
     if completed_ticket:
-        message = f'Ticket {completed_ticket} completed. Now serving {next_ticket.display_number}'
+        message = f'{window.name}: Ticket {completed_ticket} completed. Now serving {next_ticket.display_number}'
     else:
-        message = f'Now serving {next_ticket.display_number}'
+        message = f'{window.name}: Now serving {next_ticket.display_number}'
 
     return Response({
         'success': True,
@@ -140,13 +145,18 @@ def call_next_ticket(request):
             'display_number': next_ticket.display_number,
             'queue_number': next_ticket.queue_number,
             'status': next_ticket.status,
-            'people_ahead': next_ticket.people_ahead
+            'people_ahead': next_ticket.people_ahead,
+            'window': {
+                'id': window.id,
+                'name': window.name,
+                'number': window.window_number
+            }
         },
         'completed_ticket': completed_ticket,
         'window': {
-            'id': available_window.id,
-            'name': available_window.name,
-            'number': available_window.window_number
+            'id': window.id,
+            'name': window.name,
+            'number': window.window_number
         },
         'queue_info': {
             'waiting_count': waiting_count,

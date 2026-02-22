@@ -92,6 +92,7 @@ class ServiceAdmin(admin.ModelAdmin):
 @admin.register(ServiceWindow)
 class ServiceWindowAdmin(admin.ModelAdmin):
     list_display = (
+        'id',
         'service',
         'window_number',
         'name',
