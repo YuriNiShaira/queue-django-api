@@ -16,7 +16,7 @@ from drf_spectacular.utils import extend_schema
 @api_view(['GET'])
 @permission_classes([IsServiceStaff])
 def staff_dashboard(request):
-    """Simple dashboard for staff - just show queue for their service"""
+    # Dashboard showing queue and per-window status
     if not hasattr(request.user, 'staff_profile'):
         return Response({'success': False, 'message': 'Not staff'}, status=403)
     
@@ -35,22 +35,31 @@ def staff_dashboard(request):
         status='waiting'
     ).order_by('queue_number')
     
-    serving = Ticket.objects.filter(
-        service=service,
-        ticket_date=today,
-        status='serving'
-    )
+    windows_status = []
+    for window in service.windows.filter(status='active'):
+        serving = Ticket.objects.filter(
+            service=service,
+            assigned_window=window,
+            ticket_date=today,
+            status='serving'
+        ).first()
+        
+        windows_status.append({
+            'id': window.id,
+            'name': window.name,
+            'number': window.window_number,
+            'currently_serving': serving.display_number if serving else None,
+            'is_available': True
+        })
     
     return Response({
         'success': True,
         'dashboard': {
             'service': service.name,
             'waiting_count': waiting.count(),
-            'serving_count': serving.count(),
             'next_ticket': waiting.first().display_number if waiting.exists() else None,
-            'currently_serving': TicketSerializer(serving, many=True).data,
             'waiting_list': TicketSerializer(waiting[:10], many=True).data,
-            'windows': ServiceWindowSerializer(service.windows.filter(status='active'), many=True).data
+            'windows': windows_status
         }
     })
 
@@ -168,8 +177,8 @@ def call_next_ticket(request):
 
 
 @extend_schema(
-    summary="queue management",
-    description="Staff operations for managing queues",
+    summary="Call Specific Ticket",
+    description="Call a specific ticket by its display number (e.g., 'C001')",
     tags=['Staff Queue Management']
 )
 @api_view(['POST'])
@@ -177,62 +186,117 @@ def call_next_ticket(request):
 def call_specific_ticket(request):
     #Call a specific ticket by number
     ticket_number = request.data.get('ticket_number')
+    window_id = request.data.get('window_id')
     
     if not ticket_number:
         return Response({'success': False,'message': 'ticket_number is required'}, status=status.HTTP_400_BAD_REQUEST)
     
+    if not window_id:
+        return Response({'success': False, 'message': 'window_id is required'}, status=status.HTTP_400_BAD_REQUEST)
+    
     staff_profile = request.user.staff_profile
     service = staff_profile.assigned_service
     
+    try:
+        window = ServiceWindow.objects.get(
+            id=window_id,
+            service=service,
+            status='active'
+        )
+    except ServiceWindow.DoesNotExist:
+        return Response({'success': False, 'message': 'Window not found or inactive'}, status=status.HTTP_404_NOT_FOUND)
+
     today = timezone.now().date()
     
-    # Find ticket by display number
-    try:
-        ticket = Ticket.objects.get(
+    from django.db import transaction
+
+    with transaction.atomic():
+        try:
+            ticket = Ticket.objects.select_for_update().get(
+                service = service,
+                ticket_date = today,
+                display_number = ticket_number
+            )
+        except Ticket.DoesNotExist:
+            return Response({'success': False,'message': f'Ticket {ticket_number} not found in today\'s queue'}, status=status.HTTP_404_NOT_FOUND)
+        
+        if ticket.status not in ['waiting', 'notified']:
+            return Response({'success': False, 'message': f'Ticket {ticket_number} cannot be called (current status: {ticket.status})'}, status=status.HTTP_400_BAD_REQUEST)
+
+        current_serving = Ticket.objects.filter(
             service=service,
+            assigned_window=window,
             ticket_date=today,
-            display_number=ticket_number
-        )
-    except Ticket.DoesNotExist:
-        return Response({'success': False,'message': f'Ticket {ticket_number} not found in today\'s queue'}, status=status.HTTP_404_NOT_FOUND)
-    
-    # Check ticket status
-    if ticket.status != 'waiting':
-        return Response({'success': False,'message': f'Ticket {ticket_number} is not waiting (status: {ticket.status})'}, status=status.HTTP_400_BAD_REQUEST)
-    
-    # Update ticket
-    ticket.status = 'notified'
-    ticket.called_by = request.user
-    ticket.called_at = timezone.now()
-    ticket.save()
-    
-    return Response({'success': True,'message': f'Ticket {ticket.display_number} called','ticket': TicketSerializer(ticket).data})
+            status='serving'
+        ).select_for_update().first()
+
+        if current_serving:
+            current_serving.status = 'served'
+            current_serving.served_by = request.user
+            current_serving.served_at = timezone.now()
+            current_serving.save()
+            completed_ticket = current_serving.display_number
+        else:
+            completed_ticket = None
+
+        ticket.status = 'serving'
+        ticket.called_by = request.user
+        ticket.called_at = timezone.now()
+        ticket.assigned_window = window
+        ticket.save()
+
+    return Response({
+        'success': True,
+        'message': f'Ticket {ticket.display_number} called to {window.name}',
+        'ticket': {
+            'ticket_id': ticket.ticket_id,
+            'display_number': ticket.display_number,
+            'status': ticket.status,
+            'window': {
+                'id': window.id,
+                'name': window.name,
+                'number': window.window_number
+            }
+        },
+        'completed_ticket': completed_ticket
+    })
 
 
 @extend_schema(
-    summary="queue management",
-    description="Staff operations for managing queues",
+    summary="Start Serving",
+    description="Start serving a ticket (can be from waiting or notified status)",
     tags=['Staff Queue Management']
 )
 @api_view(['POST'])
 @permission_classes([IsServiceStaff])
 def start_serving(request, ticket_id):
-    #Start serving a called ticket
     try:
         ticket = Ticket.objects.get(ticket_id=ticket_id)
         
-        # Check permission
         if ticket.service != request.user.staff_profile.assigned_service:
             return Response({'success': False,'message': 'You do not have permission to serve tickets from this service'}, status=status.HTTP_403_FORBIDDEN)
         
-        if ticket.status != 'notified':
-            return Response({'success': False,'message': f'Ticket must be in "notified" status. Current: {ticket.status}'}, status=status.HTTP_400_BAD_REQUEST)
+        if ticket.status not in ['waiting', 'notified']:
+            return Response({'success': False,'message': f'Ticket must be in "waiting" or "notified" status. Current: {ticket.status}'}, status=status.HTTP_400_BAD_REQUEST)
         
-        # Update ticket
+        window_id = request.data.get('window_id')
+        if not window_id:
+            return Response({'success': False,'message': 'window_id is required'}, status=400)
+
+        try:
+            window = ServiceWindow.objects.get(
+                id=window_id,
+                service=ticket.service,
+                status='active'
+            )
+        except ServiceWindow.DoesNotExist:
+            return Response({'success': False,'message': 'Window not found or inactive'}, status=404)
+
         ticket.status = 'serving'
+        ticket.assigned_window = window
         ticket.save()
-        
-        return Response({'success': True,'message': f'Now serving ticket {ticket.display_number}','ticket': TicketSerializer(ticket).data})
+
+        return Response({'success': True,'message': f'Now serving ticket {ticket.display_number} at {window.name}','ticket': TicketSerializer(ticket).data})
         
     except Ticket.DoesNotExist:
         return Response({'success': False,'message': 'Ticket not found'}, status=status.HTTP_404_NOT_FOUND)
@@ -246,7 +310,7 @@ def start_serving(request, ticket_id):
 @api_view(['POST'])
 @permission_classes([IsServiceStaff])
 def complete_serving(request, ticket_id):
-    #Manually mark a ticket as served
+    #manual served
     try:
         ticket = Ticket.objects.get(ticket_id=ticket_id)
         
@@ -284,7 +348,6 @@ def complete_serving(request, ticket_id):
 @api_view(['POST'])
 @permission_classes([IsServiceStaff])
 def remove_ticket(request, ticket_id):
-    #Remove a ticket from queue (skip or cancel)
     reason = request.data.get('reason', 'No reason provided')
     
     try:
@@ -317,7 +380,6 @@ def remove_ticket(request, ticket_id):
 @api_view(['POST'])
 @permission_classes([IsServiceStaff])
 def recall_ticket(request, ticket_id):
-    #Recall a skipped or previously called ticket
     try:
         ticket = Ticket.objects.get(ticket_id=ticket_id)
         
@@ -351,7 +413,6 @@ def recall_ticket(request, ticket_id):
 @api_view(['POST'])
 @permission_classes([IsServiceStaff])
 def toggle_queue_status(request):
-    #Pause or resume the queue for a service
     staff_profile = request.user.staff_profile
     service = staff_profile.assigned_service
     
