@@ -472,72 +472,60 @@ def delete_staff_view(request, user_id):
 
 @extend_schema(
     tags=['Admin'],
-    summary='Update staff (Admin only)',
-    description="""Update staff user information.
-    ⚠️ **Cannot update password here.** Use change password endpoint.
+    summary='Update staff account (Admin only)',
+    description="""Update staff user information and reassign to a different service.
+    **Cannot update password here.** Use change password endpoint.
     """,
+    request={
+        'application/json': {
+            'type': 'object',
+            'properties': {
+                'username': {'type': 'string', 'description': 'New username (optional)'},
+                'is_active': {'type': 'boolean', 'description': 'Activate/deactivate account'},
+                'service_id': {'type': 'integer', 'description': 'Reassign to different service'}
+            },
+            'example': {
+                'username': 'new_cashier_staff',
+                'is_active': True,
+                'service_id': 2
+            }
+        }
+    },
     responses={
         200: OpenApiResponse(
-            description="Staff updated",
+            description="Staff updated successfully",
             examples=[
                 OpenApiExample(
                     'Success Response',
                     value={
                         'success': True,
-                        'message': 'Staff account staff1 updated',
+                        'message': 'Staff account cashier_staff updated and assigned to Permit',
                         'user': {
                             'id': 2,
-                            'username': 'updated_staff',
-                            'email': 'updated@email.com'
+                            'username': 'new_cashier_staff',
+                            'is_staff': True,
+                            'is_active': True
+                        },
+                        'assigned_service': {
+                            'id': 2,
+                            'name': 'Permit',
+                            'prefix': 'P'
                         }
                     }
                 )
             ]
-        )
-    },
-    examples=[
-        OpenApiExample(
-            'Example Request',
-            value={
-                'email': 'updated@example.com',
-                'first_name': 'Updated',
-                'is_active': True
-            }
-        )
-    ]
-)
-@api_view(['PUT', 'PATCH'])
-@permission_classes([IsAdminUser])
-def update_staff_view(request, user_id):
-    try:
-        user = User.objects.get(id=user_id, is_staff=True)
-        data = request.data.copy()
-        if 'password' in data:
-            data.pop('password')
-
-        serializer = UserSerializer(user, data=data, partial=True)
-        if serializer.is_valid():
-            serializer.save()
-            return Response({'success':True, 'message': f'Staff account {user.username} updated', 'user': serializer.data})
-        return Response({'success':False, 'message':'Invalid data', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
-    except User.DoesNotExist:
-        return Response({'success': False, 'message':'Staff user not found'}, status=status.HTTP_404_NOT_FOUND)
-    
-
-@extend_schema(
-    tags=['Admin'],
-    summary='Assign staff to service (Admin only)',
-    description="Assign a staff user to a specific service. Only staff users can be assigned.",
-    request=None, 
-    responses={
-        200: OpenApiResponse(
-            description="Staff assigned successfully",
+        ),
+        400: OpenApiResponse(
+            description="Invalid data",
             examples=[
                 OpenApiExample(
-                    'Success Response',
+                    'Validation Error',
                     value={
-                        'success': True,
-                        'message': 'john assigned to Registrar'
+                        'success': False,
+                        'message': 'Invalid data',
+                        'errors': {
+                            'username': ['A user with that username already exists.']
+                        }
                     }
                 )
             ]
@@ -549,7 +537,7 @@ def update_staff_view(request, user_id):
                     'User Not Found',
                     value={
                         'success': False,
-                        'message': 'User not found'
+                        'message': 'Staff user not found'
                     }
                 ),
                 OpenApiExample(
@@ -561,34 +549,81 @@ def update_staff_view(request, user_id):
                 )
             ]
         )
-    },
-    examples=[
-        OpenApiExample(
-            'Example Request',
-            value={'service_id': 1}
-        )
-    ]
+    }
 )
-@api_view(['POST'])
+@api_view(['PUT', 'PATCH'])
 @permission_classes([IsAdminUser])
-def assign_staff_to_service(request, user_id):
-    #Assign staff user to a service
-    service_id = request.data.get('service_id')
-    
+def update_staff_view(request, user_id):
     try:
+        # Get the staff user
         user = User.objects.get(id=user_id, is_staff=True)
-        service = Service.objects.get(id=service_id)
         
-        profile, created = StaffProfile.objects.get_or_create(user=user)
-        profile.assigned_service = service
-        profile.role = 'staff'
-        profile.save()
+        # Copy data and remove password fields
+        data = request.data.copy()
+        if 'password' in data:
+            data.pop('password')
+        if 'password2' in data:
+            data.pop('password2')
         
-        return Response({'success': True,'message': f'{user.username} assigned to {service.name}'})
+        # Check if service_id is provided and valid
+        service_id = data.pop('service_id', None)
+        if service_id:
+            try:
+                service = Service.objects.get(id=service_id)
+            except Service.DoesNotExist:
+                return Response({
+                    'success': False,
+                    'message': 'Service not found'
+                }, status=status.HTTP_404_NOT_FOUND)
+        
+        # Update user fields (username, is_active, etc.)
+        serializer = UserSerializer(user, data=data, partial=True)
+        if serializer.is_valid():
+            serializer.save()
+            
+            # Update service assignment if provided
+            if service_id:
+                # Get or create staff profile
+                profile, created = StaffProfile.objects.get_or_create(user=user)
+                profile.assigned_service = service
+                profile.role = 'staff'
+                profile.save()
+                assigned_service_name = service.name
+            else:
+                # Keep existing service assignment
+                if hasattr(user, 'staff_profile') and user.staff_profile.assigned_service:
+                    assigned_service_name = user.staff_profile.assigned_service.name
+                    service = user.staff_profile.assigned_service
+                else:
+                    assigned_service_name = None
+                    service = None
+            
+            # Prepare response
+            user_data = {
+                'id': user.id,
+                'username': user.username,
+                'is_staff': user.is_staff,
+                'is_active': user.is_active
+            }
+            
+            service_data = None
+            if service:
+                service_data = {
+                    'id': service.id,
+                    'name': service.name,
+                    'prefix': service.prefix
+                }
+            
+            message = f'Staff account {user.username} updated'
+            if service_id:
+                message += f' and assigned to {assigned_service_name}'
+            
+            return Response({'success': True,'message': message,'user': user_data,'assigned_service': service_data})
+        
+        return Response({'success': False,'message': 'Invalid data','errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+        
     except User.DoesNotExist:
-        return Response({'success': False, 'message': 'User not found'}, status=404)
-    except Service.DoesNotExist:
-        return Response({'success': False, 'message': 'Service not found'}, status=404)
+        return Response({'success': False,'message': 'Staff user not found'}, status=status.HTTP_404_NOT_FOUND)
 
 
 @extend_schema(

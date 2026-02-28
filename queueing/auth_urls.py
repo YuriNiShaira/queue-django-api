@@ -18,7 +18,6 @@ urlpatterns = [
     path('admin/staff/list/', auth_views.list_staff_view, name='list-staff'),
     path('admin/staff/<int:user_id>/delete/', auth_views.delete_staff_view, name='delete-staff'),
     path('admin/staff/<int:user_id>/update/', auth_views.update_staff_view, name='update-staff'),
-    path('admin/staff/<int:user_id>/assign-service/', auth_views.assign_staff_to_service, name='assign-staff-service'),
     path('admin/create/', auth_views.create_admin_view, name='create-admin'),
     path('admin/list/', auth_views.list_admins_view, name='list-admins'),
     path('admin/<int:user_id>/update/', auth_views.update_admin_view, name='update-admin'),
