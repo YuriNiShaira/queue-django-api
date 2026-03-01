@@ -2,12 +2,25 @@ from rest_framework import serializers
 from django.contrib.auth.models import User
 from django.contrib.auth.password_validation import validate_password
 from rest_framework.validators import UniqueValidator
+from .models import StaffProfile
 
 class UserSerializer(serializers.ModelSerializer):
+    assigned_service = serializers.SerializerMethodField()
+    
     class Meta:
         model = User
-        fields = ['id', 'username', 'is_staff', 'is_superuser']
+        fields = ['id', 'username', 'is_staff', 'is_superuser', 'assigned_service']
         read_only_fields = ['id', 'is_staff']
+
+    def get_assigned_service(self, obj):
+        try:
+            profile = StaffProfile.objects.get(user=obj)
+            return {
+                "id": profile.assigned_service.id,
+                "name": profile.assigned_service.name
+            } if profile.assigned_service else None
+        except StaffProfile.DoesNotExist:
+            return None
 
 class LoginSerializer(serializers.Serializer):
     username = serializers.CharField(required=True, error_messages={'required': 'Username is required','blank': 'Username cannot be empty'})
@@ -42,7 +55,6 @@ class RegisterStaffSerializer(serializers.ModelSerializer):
         user.set_password(validated_data['password'])
         user.save()
         
-        # Assign to service immediately
         from .models import StaffProfile, Service
         service = Service.objects.get(id=service_id)
         StaffProfile.objects.create(user=user, assigned_service=service, role='staff', can_manage_queue=True)
