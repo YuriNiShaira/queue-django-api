@@ -48,7 +48,10 @@ def staff_dashboard(request):
             'id': window.id,
             'name': window.name,
             'number': window.window_number,
-            'currently_serving': serving.display_number if serving else None,
+            'currently_serving': {
+                'ticket_id': serving.ticket_id,
+                'display_number': serving.display_number
+            } if serving else None,
             'is_available': True
         })
     
