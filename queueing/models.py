@@ -13,7 +13,7 @@ from django.contrib.auth.models import User
 class Service(models.Model):
     name = models.CharField(max_length=100, unique=True)
     description = models.TextField(blank=True)
-    prefix = models.CharField(max_length=10, default="", blank=True)
+    prefix = models.CharField(max_length=10, default="", blank=True, unique=True)
     is_active = models.BooleanField(default=True)
     average_service_time = models.PositiveIntegerField(default=5)
 

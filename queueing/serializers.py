@@ -49,6 +49,16 @@ class ServiceSerializer(serializers.ModelSerializer):
     def get_currently_serving(self, obj):
         serving = obj.currently_serving
         return serving.display_number if serving else None
+    
+    def validate_prefix(self, value):
+        if value:
+            queryset = Service.objects.filter(prefix = value)
+
+            if self.instance:
+                queryset = queryset.exclude(pk=self.instance.pk)
+
+            if queryset.exists():
+                raise serializers.ValidationError('Prefix already exists, Please use a unique prefix')
 
 class TicketSerializer(serializers.ModelSerializer):
     display_number = serializers.CharField(read_only=True)
