@@ -4,7 +4,7 @@ __pycache__/
 
 # Environment variables
 .env
-
+venv/
 # SQLite (if local)
 db.sqlite3
 
