@@ -102,14 +102,15 @@ def ticket_status(request, ticket_id):
 
 
 @extend_schema(
-    summary="Generate Ticket",
-    description="Generate a new ticket for a specific service",
+    summary="Public Dashboard Status",
+    description="Get dashboard status for display screens. Shows all currently serving tickets per service.",
     tags=['Public Endpoints']
 )
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def dashboard_status(request):
-    # Public: Get dashboard status for display screens
+    #Public: Get dashboard status for display screens (TV Monitor)
+    #Shows all currently serving tickets across all windows
     services = Service.objects.filter(is_active=True).order_by('name')
     
     service_data = []
@@ -117,17 +118,49 @@ def dashboard_status(request):
         today = timezone.now().date()
         tickets_today = service.tickets.filter(ticket_date=today)
         
-        currently_serving = tickets_today.filter(status='serving').first()
-        waiting_tickets = tickets_today.filter(status__in=['waiting', 'notified']).order_by('queue_number')
+        # Get ALL currently serving tickets with their window info
+        serving_tickets = tickets_today.filter(status='serving').select_related('assigned_window').order_by('assigned_window__window_number')
+        
+        # Format serving tickets with window details
+        currently_serving_list = []
+        for ticket in serving_tickets:
+            if ticket.assigned_window:
+                currently_serving_list.append({'ticket_number': ticket.display_number,'window_name': ticket.assigned_window.name,'window_number': ticket.assigned_window.window_number})
+            else:
+                currently_serving_list.append({'ticket_number': ticket.display_number,'window_name': 'Unknown Window','window_number': None})
+        
+        # Get waiting tickets
+        waiting_tickets = tickets_today.filter(
+            status__in=['waiting', 'notified']
+        ).order_by('queue_number')
+        
+        # Calculate estimated wait time for next ticket
+        next_wait_time = None
+        if waiting_tickets.exists():
+            next_wait_time = waiting_tickets.first().wait_time_minutes
         
         service_data.append({
             'id': service.id,
             'name': service.name,
             'prefix': service.prefix,
-            'currently_serving': currently_serving.display_number if currently_serving else None,
+            'currently_serving': currently_serving_list, 
+            'serving_count': len(currently_serving_list),
             'next_in_line': waiting_tickets.first().display_number if waiting_tickets.exists() else None,
             'waiting_count': waiting_tickets.count(),
+            'estimated_next_wait': next_wait_time,
             'average_wait_time': service.average_service_time * waiting_tickets.count()
         })
     
-    return Response({'success': True,'services': service_data,'timestamp': timezone.now().isoformat()})
+    # Also get overall stats for the TV display
+    total_waiting = sum(s['waiting_count'] for s in service_data)
+    total_serving = sum(s['serving_count'] for s in service_data)
+    
+    return Response({
+        'success': True,
+        'timestamp': timezone.now().isoformat(),
+        'summary': {
+            'total_waiting': total_waiting,
+            'total_serving': total_serving,
+        },
+        'services': service_data
+    })
