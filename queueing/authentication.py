@@ -2,7 +2,6 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework_simplejwt.exceptions import InvalidToken, AuthenticationFailed
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.conf import settings
-from django.contrib.auth.models import User
 
 
 class JWTCookieAuthentication(JWTAuthentication):

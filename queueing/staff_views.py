@@ -6,6 +6,7 @@ from .models import Ticket, ServiceWindow
 from .serializers import TicketSerializer, ServiceWindowSerializer
 from .permissions import IsServiceStaff
 from drf_spectacular.utils import extend_schema
+from .websocket_utils import send_dashboard_update, send_service_update, send_ticket_update, send_queue_position_updates
 
 
 @extend_schema(
@@ -66,16 +67,15 @@ def staff_dashboard(request):
         }
     })
 
-
 @extend_schema(
-    summary="Call Next Ticket",
-    description="Call the next waiting ticket to a specific window. Auto-completes any ticket currently at that window.",
+    summary="queue management",
+    description="Call next ticket",
     tags=['Staff Queue Management']
 )
 @api_view(['POST'])
 @permission_classes([IsServiceStaff])
 def call_next_ticket(request):
-    #Call the next waiting ticket
+    #Call the next waiting ticket to a specific window
 
     # Check if user has staff profile
     if not hasattr(request.user, 'staff_profile'):
@@ -87,68 +87,105 @@ def call_next_ticket(request):
     if not service:
         return Response({'success': False,'message': 'No service assigned'}, status=400)
     
+    # Get window_id from request
     window_id = request.data.get('window_id')
     if not window_id:
         return Response({'success': False,'message': 'window_id is required'}, status=status.HTTP_400_BAD_REQUEST)
     
+    # Verify window exists and belongs to this service
     try:
-        window = ServiceWindow.objects.get(id=window_id, service=service, status='active')
+        window = ServiceWindow.objects.get(
+            id=window_id,
+            service=service,
+            status='active'
+        )
     except ServiceWindow.DoesNotExist:
-        return Response({'success': False, 'message': 'Window not found or inactive'}, status=status.HTTP_404_NOT_FOUND)
-        
-    
+        return Response({'success': False,'message': 'Window not found or inactive'}, status=status.HTTP_404_NOT_FOUND)
+
     today = timezone.now().date()
     
+    #Use transaction to ensure data consistency
     from django.db import transaction
-    # STEP 1: Check if this window is already serving a ticket
     with transaction.atomic():
+        # STEP 1: Check if this window is already serving a ticket
         current_serving = Ticket.objects.filter(
             service=service,
             assigned_window=window,
             ticket_date=today,
             status='serving'
         ).select_for_update().first()
-
+        
+        completed_ticket = None
         if current_serving:
+            # Auto-complete the current ticket at this window
             current_serving.status = 'served'
             current_serving.served_by = request.user
             current_serving.served_at = timezone.now()
             current_serving.save()
             completed_ticket = current_serving.display_number
-        else:
-            completed_ticket = None
-
-        # STEP 2: Find next waiting ticket
+        
+        # STEP 2: Find next waiting ticket for this service
         next_ticket = Ticket.objects.filter(
             service=service,
             ticket_date=today,
             status='waiting'
         ).select_for_update().order_by('queue_number').first()
-
+        
         if not next_ticket:
-            message = 'No tickets waiting in queue'
+            # Prepare message based on whether we completed a ticket
             if completed_ticket:
                 message = f'Ticket {completed_ticket} completed at {window.name}. No more tickets waiting.'
-
-            return Response({'success': False, 'message': message}, status=status.HTTP_404_NOT_FOUND)
+            else:
+                message = 'No tickets waiting in queue'
+            
+            # Trigger WebSocket updates even when no next ticket
+            from .websocket_utils import send_dashboard_update, send_service_update
+            send_dashboard_update()
+            send_service_update(service.id)
+            if completed_ticket:
+                send_ticket_update(current_serving.ticket_id)
+            
+            return Response({'success': False,'message': message}, status=status.HTTP_404_NOT_FOUND)
         
         # STEP 3: Assign next ticket to this window
         next_ticket.status = 'serving'
         next_ticket.called_by = request.user
         next_ticket.called_at = timezone.now()
-        next_ticket.assigned_window = window  # Assign to specific window
+        next_ticket.assigned_window = window
         next_ticket.save()
-
+        
         # STEP 4: Get queue info for response
-        waiting_count = Ticket.objects.filter(service=service, ticket_date=today, status='waiting').count()
+        waiting_count = Ticket.objects.filter(
+            service=service,
+            ticket_date=today,
+            status='waiting'
+        ).count()
+        
+        next_waiting = Ticket.objects.filter(
+            service=service,
+            ticket_date=today,
+            status='waiting'
+        ).order_by('queue_number').first()
+        
+        # STEP 5: Trigger WebSocket updates
+        from .websocket_utils import send_dashboard_update, send_service_update, send_ticket_update
+        
+        send_dashboard_update()
+        send_service_update(service.id)
 
-        next_waiting = Ticket.objects.filter(service=service, ticket_date=today, status='waiting').order_by('queue_number').first()
+        #Update ALL waiting tickets' queue positions
+        send_queue_position_updates(service.id, str(next_ticket.ticket_id))
 
+        if completed_ticket:
+            send_ticket_update(current_serving.ticket_id)
+        send_ticket_update(next_ticket.ticket_id)
+    
+    # Prepare response message
     if completed_ticket:
         message = f'{window.name}: Ticket {completed_ticket} completed. Now serving {next_ticket.display_number}'
     else:
         message = f'{window.name}: Now serving {next_ticket.display_number}'
-
+    
     return Response({
         'success': True,
         'message': message,
@@ -328,7 +365,12 @@ def complete_serving(request, ticket_id):
         ticket.served_by = request.user
         ticket.served_at = timezone.now()
         ticket.save()
-        
+
+        # Trigger WebSocket updates
+        send_dashboard_update()
+        send_service_update(ticket.service.id)
+        send_ticket_update(ticket.ticket_id)
+            
         return Response({
             'success': True,
             'message': f'Ticket {ticket.display_number} marked as served',

@@ -7,7 +7,7 @@ from .models import Service, Ticket
 from .serializers import ServiceSerializer, TicketSerializer
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
-
+from .websocket_utils import send_dashboard_update, send_service_update, send_ticket_update
 
 
 @extend_schema(
@@ -46,6 +46,9 @@ def generate_ticket(request):
     # Create ticket
     ticket = Ticket.objects.create(service=service)
     
+    send_dashboard_update()
+    send_service_update(service.id)
+
     # Prepare response
     response_data = {
         'success': True,

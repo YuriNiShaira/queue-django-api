@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Queuick WebSocket Tester</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; background: #f5f5f5; }
+        .container { display: flex; gap: 20px; flex-wrap: wrap; }
+        .card { 
+            background: white; 
+            border-radius: 8px; 
+            padding: 15px; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            flex: 1;
+            min-width: 300px;
+        }
+        h3 { margin-top: 0; color: #333; border-bottom: 2px solid #eee; padding-bottom: 10px; }
+        .status { 
+            padding: 8px; 
+            border-radius: 4px; 
+            margin: 10px 0;
+            font-weight: bold;
+        }
+        .connected { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+        .disconnected { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+        .messages { 
+            height: 200px; 
+            overflow-y: auto; 
+            border: 1px solid #ddd; 
+            padding: 10px; 
+            background: #fafafa;
+            font-family: monospace;
+            font-size: 12px;
+        }
+        .msg { border-bottom: 1px solid #eee; padding: 5px; }
+        .timestamp { color: #999; font-size: 10px; }
+        button { 
+            background: #007bff; 
+            color: white; 
+            border: none; 
+            padding: 8px 15px; 
+            border-radius: 4px;
+            cursor: pointer;
+            margin-right: 5px;
+        }
+        button:hover { background: #0056b3; }
+        button.danger { background: #dc3545; }
+        button.danger:hover { background: #bd2130; }
+        button.success { background: #28a745; }
+        button.success:hover { background: #218838; }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+        input { padding: 8px; border: 1px solid #ddd; border-radius: 4px; width: 200px; margin: 5px 0; }
+        .login-box {
+            background: white;
+            padding: 20px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .login-status {
+            margin-left: 10px;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <h1>🔌 Queuick WebSocket Tester</h1>
+    <p>Test all WebSocket endpoints in real-time</p>
+
+    <!-- Login Section -->
+    <div class="login-box">
+        <h3>🔐 Authentication</h3>
+        <div>
+            <input type="text" id="login-username" value="cashier_staff" placeholder="Username">
+            <input type="password" id="login-password" value="staff123" placeholder="Password">
+            <button class="success" onclick="login()">Login</button>
+            <button onclick="logout()" class="danger">Logout</button>
+            <span id="login-status" class="login-status">Not logged in</span>
+        </div>
+        <p style="font-size: 12px; color: #666; margin-top: 10px;">
+            ⚠️ Staff dashboard requires login. Public dashboard and ticket status do not.
+        </p>
+    </div>
+
+    <div class="container">
+        <!-- Dashboard Card -->
+        <div class="card">
+            <h3>📺 Public Dashboard</h3>
+            <div id="dashboard-status" class="status disconnected">🔴 Disconnected</div>
+            <div>
+                <button onclick="connectDashboard()">Connect</button>
+                <button class="danger" onclick="disconnectDashboard()">Disconnect</button>
+            </div>
+            <div class="messages" id="dashboard-messages"></div>
+        </div>
+
+        <!-- Staff Dashboard Card -->
+        <div class="card">
+            <h3>👥 Staff Dashboard</h3>
+            <div>
+                <label>Service ID:</label>
+                <input type="number" id="service-id" value="1" min="1">
+            </div>
+            <div id="staff-status" class="status disconnected">🔴 Disconnected</div>
+            <div>
+                <button onclick="connectStaff()">Connect</button>
+                <button class="danger" onclick="disconnectStaff()">Disconnect</button>
+            </div>
+            <div class="messages" id="staff-messages"></div>
+        </div>
+
+        <!-- Ticket Status Card -->
+        <div class="card">
+            <h3>🎫 Ticket Status</h3>
+            <div>
+                <label>Ticket ID:</label>
+                <input type="text" id="ticket-id" placeholder="uuid-here">
+                <button onclick="getSampleTicketId()" style="font-size: 11px; padding: 4px 8px;">Get Sample</button>
+            </div>
+            <div id="ticket-status" class="status disconnected">🔴 Disconnected</div>
+            <div>
+                <button onclick="connectTicket()">Connect</button>
+                <button class="danger" onclick="disconnectTicket()">Disconnect</button>
+            </div>
+            <div class="messages" id="ticket-messages"></div>
+        </div>
+    </div>
+
+    <div style="margin-top: 20px; text-align: center;">
+        <button onclick="connectAll()">Connect All</button>
+        <button class="danger" onclick="disconnectAll()">Disconnect All</button>
+        <button onclick="clearAll()">Clear Messages</button>
+        <button onclick="generateTestTicket(this)" class="success" id="generate-btn">Generate Test Ticket</button>
+    </div>
+
+    <script>
+        // WebSocket instances
+        let dashboardWs = null;
+        let staffWs = null;
+        let ticketWs = null;
+
+        // Login status
+        let isLoggedIn = false;
+
+        // Flags to prevent multiple operations
+        let isGenerating = false;
+        let isLoggingIn = false;
+        let lastClickTime = 0;
+        const DEBOUNCE_TIME = 1000; // 1 second
+
+        // Helper to add message to a messages div
+        function addMessage(elementId, message, isJson = false) {
+            const msgs = document.getElementById(elementId);
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'msg';
+            
+            const time = new Date().toLocaleTimeString();
+            
+            if (isJson) {
+                try {
+                    const formatted = JSON.stringify(JSON.parse(message), null, 2);
+                    msgDiv.innerHTML = `<span class="timestamp">${time}</span> 📥 <pre style="margin:5px 0">${formatted}</pre>`;
+                } catch (e) {
+                    msgDiv.innerHTML = `<span class="timestamp">${time}</span> 📥 ${message}`;
+                }
+            } else {
+                msgDiv.innerHTML = `<span class="timestamp">${time}</span> ${message}`;
+            }
+            
+            msgs.appendChild(msgDiv);
+            msgs.scrollTop = msgs.scrollHeight;
+        }
+
+        // Debounce function to prevent double-clicks
+        function checkDebounce() {
+            const now = Date.now();
+            if (now - lastClickTime < DEBOUNCE_TIME) {
+                console.log('⚠️ Click debounced - too fast!');
+                return false;
+            }
+            lastClickTime = now;
+            return true;
+        }
+
+        // Login function
+        async function login() {
+        const username = document.getElementById('login-username').value;
+        const password = document.getElementById('login-password').value;
+        
+        try {
+            const response = await fetch('http://localhost:8000/api/auth/login/', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({username, password}),
+                credentials: 'include'  // THIS IS CRITICAL!
+            });
+            
+            const data = await response.json();
+            
+            if (data.success) {
+                isLoggedIn = true;
+                document.getElementById('login-status').innerHTML = '✅ Logged in as ' + username;
+                
+                // Check cookies after login
+                console.log('Cookies after login:', document.cookie);
+                
+                if (document.cookie) {
+                    console.log('✅ Cookies set successfully!');
+                } else {
+                    console.log('❌ Cookies still empty!');
+                }
+            } else {
+                // handle error
+            }
+        } catch (error) {
+            console.error('Login error:', error);
+        }
+    }
+        // Logout function
+        async function logout() {
+            if (!checkDebounce()) return false;
+            
+            try {
+                await fetch('http://localhost:8000/api/auth/logout/', {
+                    method: 'POST',
+                    credentials: 'include'
+                });
+                
+                isLoggedIn = false;
+                document.getElementById('login-status').innerHTML = 'Logged out';
+                document.getElementById('login-status').style.color = 'black';
+                
+                // Disconnect staff if connected
+                disconnectStaff();
+                
+                addMessage('staff-messages', '🔐 Logged out');
+            } catch (error) {
+                console.error('Logout error:', error);
+            }
+            
+            return false;
+        }
+
+        // Generate a test ticket - FIXED to prevent multiple generations
+        async function generateTestTicket(button) {
+            // Debounce check
+            if (!checkDebounce()) return false;
+            
+            // Prevent multiple simultaneous generations
+            if (isGenerating) {
+                addMessage('ticket-messages', '⏳ Already generating a ticket, please wait...');
+                return false;
+            }
+            
+            // Disable the button
+            if (button) {
+                button.disabled = true;
+                button.innerText = 'Generating...';
+            }
+            
+            isGenerating = true;
+            
+            try {
+                const response = await fetch('http://localhost:8000/api/tickets/generate/', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({service_id: 1}),
+                    credentials: 'include'
+                });
+                
+                const data = await response.json();
+                if (data.success && data.ticket) {
+                    const ticketId = data.ticket.ticket_id;
+                    document.getElementById('ticket-id').value = ticketId;
+                    addMessage('ticket-messages', `✅ Generated ticket: ${data.ticket.display_number}`);
+                    addMessage('ticket-messages', `📋 Ticket ID: ${ticketId}`);
+                    console.log('✅ Ticket generated once:', data.ticket.display_number);
+                } else {
+                    addMessage('ticket-messages', '❌ Failed to generate ticket');
+                }
+            } catch (error) {
+                console.error('Generate ticket error:', error);
+                addMessage('ticket-messages', '❌ Error: ' + error);
+            } finally {
+                // Re-enable the button after a delay
+                setTimeout(() => {
+                    isGenerating = false;
+                    if (button) {
+                        button.disabled = false;
+                        button.innerText = 'Generate Test Ticket';
+                    }
+                }, 500);
+            }
+            
+            return false;
+        }
+
+        // Get sample ticket ID from URL or generate one - FIXED
+        let isGettingSample = false;
+        
+        async function getSampleTicketId() {
+            if (!checkDebounce()) return false;
+            if (isGettingSample) return false;
+            
+            isGettingSample = true;
+            
+            // Try to get from URL parameter
+            const urlParams = new URLSearchParams(window.location.search);
+            const ticketId = urlParams.get('ticket');
+            if (ticketId) {
+                document.getElementById('ticket-id').value = ticketId;
+                addMessage('ticket-messages', `📋 Loaded ticket ID from URL: ${ticketId}`);
+            } else {
+                // Get the generate button element and pass it
+                const generateBtn = document.getElementById('generate-btn');
+                await generateTestTicket(generateBtn);
+            }
+            
+            setTimeout(() => {
+                isGettingSample = false;
+            }, 1000);
+            
+            return false;
+        }
+
+        // Dashboard WebSocket
+        function connectDashboard() {
+            if (dashboardWs && dashboardWs.readyState === WebSocket.OPEN) {
+                addMessage('dashboard-messages', '⚠️ Dashboard already connected');
+                return false;
+            }
+            
+            if (dashboardWs) dashboardWs.close();
+            
+            dashboardWs = new WebSocket('ws://localhost:8000/ws/dashboard/');
+            
+            dashboardWs.onopen = function() {
+                document.getElementById('dashboard-status').className = 'status connected';
+                document.getElementById('dashboard-status').innerHTML = '🟢 Connected';
+                addMessage('dashboard-messages', '✅ Connected to public dashboard');
+            };
+            
+            dashboardWs.onmessage = function(event) {
+                addMessage('dashboard-messages', event.data, true);
+            };
+            
+            dashboardWs.onerror = function(error) {
+                addMessage('dashboard-messages', '❌ Error: ' + JSON.stringify(error));
+            };
+            
+            dashboardWs.onclose = function() {
+                document.getElementById('dashboard-status').className = 'status disconnected';
+                document.getElementById('dashboard-status').innerHTML = '🔴 Disconnected';
+                addMessage('dashboard-messages', '🔌 Disconnected');
+                dashboardWs = null;
+            };
+            
+            return false;
+        }
+
+        function disconnectDashboard() {
+            if (dashboardWs) dashboardWs.close();
+            return false;
+        }
+
+        // Staff WebSocket
+        function connectStaff() {
+            if (staffWs && staffWs.readyState === WebSocket.OPEN) {
+                addMessage('staff-messages', '⚠️ Staff dashboard already connected');
+                return false;
+            }
+            
+            if (staffWs) staffWs.close();
+            
+            const serviceId = document.getElementById('service-id').value;
+            
+            // Get cookies from document
+            const cookies = document.cookie;
+            console.log('Current cookies:', cookies); // Debug: see what cookies exist
+            
+            // Create WebSocket with cookies in header
+            staffWs = new WebSocket(`ws://localhost:8000/ws/staff/${serviceId}/`);
+            
+            // Manually set cookie header when connection opens
+            staffWs.onopen = function() {
+                // Send cookies through WebSocket as first message
+                staffWs.send(JSON.stringify({
+                    type: 'authenticate',
+                    cookies: document.cookie
+                }));
+                
+                document.getElementById('staff-status').className = 'status connected';
+                document.getElementById('staff-status').innerHTML = '🟢 Connected';
+                addMessage('staff-messages', `✅ Connected to staff dashboard (service ${serviceId})`);
+            };
+            
+            staffWs.onmessage = function(event) {
+                addMessage('staff-messages', event.data, true);
+            };
+            
+            staffWs.onerror = function(error) {
+                console.error('WebSocket error:', error);
+                addMessage('staff-messages', '❌ Error: ' + JSON.stringify(error));
+            };
+            
+            staffWs.onclose = function(event) {
+                document.getElementById('staff-status').className = 'status disconnected';
+                document.getElementById('staff-status').innerHTML = '🔴 Disconnected';
+                
+                if (event.code === 1006) {
+                    addMessage('staff-messages', '❌ Authentication failed - Cookies not sent');
+                } else {
+                    addMessage('staff-messages', '🔌 Disconnected');
+                }
+                
+                staffWs = null;
+            };
+            
+            return false;
+        }
+
+        function disconnectStaff() {
+            if (staffWs) staffWs.close();
+            return false;
+        }
+
+        // Ticket WebSocket
+        function connectTicket() {
+            if (ticketWs && ticketWs.readyState === WebSocket.OPEN) {
+                addMessage('ticket-messages', '⚠️ Ticket WebSocket already connected');
+                return false;
+            }
+            
+            if (ticketWs) ticketWs.close();
+            
+            // TRIM the input to remove spaces!
+            const ticketId = document.getElementById('ticket-id').value.trim();
+            
+            if (!ticketId) {
+                alert('Please enter a ticket ID');
+                return false;
+            }
+            
+            ticketWs = new WebSocket(`ws://localhost:8000/ws/ticket/${ticketId}/`);
+            
+            ticketWs.onopen = function() {
+                document.getElementById('ticket-status').className = 'status connected';
+                document.getElementById('ticket-status').innerHTML = '🟢 Connected';
+                addMessage('ticket-messages', `✅ Connected to ticket ${ticketId}`);
+            };
+            
+            ticketWs.onmessage = function(event) {
+                addMessage('ticket-messages', event.data, true);
+            };
+            
+            ticketWs.onerror = function(error) {
+                addMessage('ticket-messages', '❌ Error: ' + JSON.stringify(error));
+            };
+            
+            ticketWs.onclose = function() {
+                document.getElementById('ticket-status').className = 'status disconnected';
+                document.getElementById('ticket-status').innerHTML = '🔴 Disconnected';
+                addMessage('ticket-messages', '🔌 Disconnected');
+                ticketWs = null;
+            };
+            
+            return false;
+        }
+
+        function disconnectTicket() {
+            if (ticketWs) ticketWs.close();
+            return false;
+        }
+
+        // Utility functions
+        function connectAll() {
+            connectDashboard();
+            if (isLoggedIn) {
+                connectStaff();
+            } else {
+                addMessage('staff-messages', '⚠️ Login first to connect staff dashboard');
+            }
+            connectTicket();
+            return false;
+        }
+
+        function disconnectAll() {
+            disconnectDashboard();
+            disconnectStaff();
+            disconnectTicket();
+            return false;
+        }
+
+        function clearAll() {
+            document.getElementById('dashboard-messages').innerHTML = '';
+            document.getElementById('staff-messages').innerHTML = '';
+            document.getElementById('ticket-messages').innerHTML = '';
+            return false;
+        }
+
+        // Override double-click on generate button
+        document.addEventListener('DOMContentLoaded', function() {
+            const generateBtn = document.getElementById('generate-btn');
+            if (generateBtn) {
+                generateBtn.addEventListener('dblclick', function(e) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    console.log('Double-click prevented on generate button');
+                    return false;
+                });
+            }
+        });
+
+        // Auto-connect to dashboard on page load
+        window.onload = function() {
+            connectDashboard();
+            // Check URL for ticket ID after a short delay
+            setTimeout(() => {
+                getSampleTicketId();
+            }, 500);
+        };
+    </script>
+</body>
+</html>
