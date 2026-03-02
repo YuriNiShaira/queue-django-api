@@ -30,17 +30,40 @@ ALLOWED_HOSTS = ["*"]
 # =========================
 
 INSTALLED_APPS = [
+    'daphne',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'channels',
     'drf_spectacular',
     'corsheaders',
     'rest_framework',
     'queueing',
 ]
+
+# Channels configuration
+ASGI_APPLICATION = 'backend.asgi.application'
+
+# Use in-memory channel layer for development
+CHANNEL_LAYERS = {
+    'default': {
+        'BACKEND': 'channels.layers.InMemoryChannelLayer'
+    }
+}
+
+
+# For production, you'd use Redis:
+# CHANNEL_LAYERS = {
+#     'default': {
+#         'BACKEND': 'channels_redis.core.RedisChannelLayer',
+#         'CONFIG': {
+#             'hosts': [('127.0.0.1', 6379)],
+#         },
+#     },
+# }
 
 
 # =========================
@@ -58,20 +81,24 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-CORS_ALLOW_ALL_ORIGINS = True  # For development, restrict in production
-CORS_ALLOW_CREDENTIALS = True  # Allow cookies to be sent
+CORS_ALLOW_ALL_ORIGINS = True  # For development only
+CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
-    # Add your frontend URLs here
+    "http://localhost:8080",
 ]
 
-# For CSRF protection with cookies
 CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:8000",
+    "http://127.0.0.1:8000",
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
+    "http://localhost:8080",
 ]
 
 
@@ -83,7 +110,7 @@ ROOT_URLCONF = 'backend.urls'
 
 WSGI_APPLICATION = 'backend.wsgi.application'
 
-
+'''
 # =========================
 # DATABASE
 # =========================
@@ -102,6 +129,18 @@ else:
             "NAME": BASE_DIR / "db.sqlite3",
         }
     }
+'''
+
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.getenv('DB_NAME'),
+        'USER': os.getenv('DB_USER'),
+        'PASSWORD': os.getenv('DB_PASSWORD'),
+        'HOST': os.getenv('DB_HOST', 'localhost'),
+        'PORT': os.getenv('DB_PORT', '5432'),
+    }
+}
 
 
 # =========================
@@ -187,13 +226,13 @@ SIMPLE_JWT = {
     'USER_ID_CLAIM': 'user_id',
     
     # Cookie settings (we'll use these in our custom views)
-    'AUTH_COOKIE': 'access_token',  # Cookie name for access token
-    'AUTH_COOKIE_REFRESH': 'refresh_token',  # Cookie name for refresh token
-    'AUTH_COOKIE_SECURE': not DEBUG,  # HTTPS only in production
-    'AUTH_COOKIE_HTTP_ONLY': True,  # HTTP-only cookie (can't be accessed by JavaScript)
-    'AUTH_COOKIE_SAMESITE': 'Strict',  # Prevent CSRF
-    'AUTH_COOKIE_PATH': '/',  # Cookie path
-    'AUTH_COOKIE_DOMAIN': None,  # Cookie domain
+    'AUTH_COOKIE': 'access_token',
+    'AUTH_COOKIE_REFRESH': 'refresh_token',
+    'AUTH_COOKIE_SECURE': False,  # Must be False for local HTTP
+    'AUTH_COOKIE_HTTP_ONLY': True,
+    'AUTH_COOKIE_SAMESITE': 'Lax',  # Lax for development
+    'AUTH_COOKIE_PATH': '/',
+    'AUTH_COOKIE_DOMAIN': None,  # Important! Let browser handle domain
 }
 
 
