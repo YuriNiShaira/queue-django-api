@@ -20,7 +20,7 @@ class TestConsumer(AsyncWebsocketConsumer):
         
         try:
             await self.accept()
-            print("✅ TestConsumer connection accepted")
+            print("TestConsumer connection accepted")
             logger.info("TestConsumer connection accepted")
             
             await self.send(text_data=json.dumps({
@@ -28,15 +28,15 @@ class TestConsumer(AsyncWebsocketConsumer):
                 'message': 'Connected to test consumer'
             }))
         except Exception as e:
-            print(f"❌ Error in connect: {e}")
+            print(f"Error in connect: {e}")
             logger.error(f"Error in connect: {e}")
     
     async def disconnect(self, close_code):
-        print(f"🔌 TestConsumer disconnected with code: {close_code}")
+        print(f"TestConsumer disconnected with code: {close_code}")
         logger.info(f"TestConsumer disconnected with code: {close_code}")
     
     async def receive(self, text_data):
-        print(f"📨 TestConsumer received: {text_data}")
+        print(f"TestConsumer received: {text_data}")
         logger.info(f"TestConsumer received: {text_data}")
         await self.send(text_data=json.dumps({
             'echo': text_data
@@ -150,11 +150,11 @@ class StaffDashboardConsumer(AsyncWebsocketConsumer):
         self.user = self.scope['user']
         
         if self.user and self.user.is_authenticated:
-            print(f"✅ User authenticated via scope: {self.user.username}")
+            print(f"User authenticated via scope: {self.user.username}")
             await self.accept()
             await self.authenticated_connect()
         else:
-            print("❌ No authenticated user in scope, waiting for manual auth")
+            print("No authenticated user in scope, waiting for manual auth")
             # Accept connection but wait for auth message
             await self.accept()
     
@@ -162,7 +162,7 @@ class StaffDashboardConsumer(AsyncWebsocketConsumer):
         """Handle messages from client"""
         try:
             data = json.loads(text_data)
-            print(f"📥 Received message: {data.get('type', 'unknown')}")
+            print(f"Received message: {data.get('type', 'unknown')}")
             
             # Handle authentication message
             if data.get('type') == 'authenticate':
@@ -173,9 +173,9 @@ class StaffDashboardConsumer(AsyncWebsocketConsumer):
                 await self.send_staff_update()
             
         except json.JSONDecodeError:
-            print("❌ Invalid JSON received")
+            print("Invalid JSON received")
         except Exception as e:
-            print(f"❌ Error in receive: {e}")
+            print(f"Error in receive: {e}")
     
     async def handle_authentication(self, data):
         """Handle manual authentication via cookies or token"""
@@ -194,10 +194,10 @@ class StaffDashboardConsumer(AsyncWebsocketConsumer):
             self.user = await self.authenticate_from_token(token)
         
         if self.user and self.user.is_authenticated:
-            print(f"✅ Manual authentication successful: {self.user.username}")
+            print(f"Manual authentication successful: {self.user.username}")
             await self.authenticated_connect()
         else:
-            print("❌ Manual authentication failed")
+            print("Manual authentication failed")
             await self.send(text_data=json.dumps({
                 'type': 'error',
                 'message': 'Authentication failed'
@@ -445,5 +445,5 @@ class TicketStatusConsumer(AsyncWebsocketConsumer):
                 'data': data
             }))
         
-
+# pang run ng Websocket
 #  daphne -b 0.0.0.0 -p 8000 backend.asgi:application
