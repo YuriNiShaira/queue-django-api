@@ -96,21 +96,6 @@
             <div class="messages" id="dashboard-messages"></div>
         </div>
 
-        <!-- Staff Dashboard Card -->
-        <div class="card">
-            <h3>👥 Staff Dashboard</h3>
-            <div>
-                <label>Service ID:</label>
-                <input type="number" id="service-id" value="1" min="1">
-            </div>
-            <div id="staff-status" class="status disconnected">🔴 Disconnected</div>
-            <div>
-                <button onclick="connectStaff()">Connect</button>
-                <button class="danger" onclick="disconnectStaff()">Disconnect</button>
-            </div>
-            <div class="messages" id="staff-messages"></div>
-        </div>
-
         <!-- Ticket Status Card -->
         <div class="card">
             <h3>🎫 Ticket Status</h3>
@@ -127,6 +112,22 @@
             <div class="messages" id="ticket-messages"></div>
         </div>
     </div>
+
+        <!-- Staff Dashboard Card -->
+        <div class="card">
+            <h3>👥 Staff Dashboard</h3>
+            <div>
+                <label>Service ID:</label>
+                <input type="number" id="service-id" value="1" min="1">
+            </div>
+            <div id="staff-status" class="status disconnected">🔴 Disconnected</div>
+            <div>
+                <button onclick="connectStaff()">Connect</button>
+                <button class="danger" onclick="disconnectStaff()">Disconnect</button>
+            </div>
+            <div class="messages" id="staff-messages"></div>
+        </div>
+
 
     <div style="margin-top: 20px; text-align: center;">
         <button onclick="connectAll()">Connect All</button>
