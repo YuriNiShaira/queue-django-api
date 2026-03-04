@@ -7,6 +7,8 @@ from .serializers import TicketSerializer, ServiceWindowSerializer
 from .permissions import IsServiceStaff
 from drf_spectacular.utils import extend_schema
 from .websocket_utils import send_dashboard_update, send_service_update, send_ticket_update, send_queue_position_updates
+from django.db import transaction
+
 
 
 @extend_schema(
@@ -224,7 +226,7 @@ def call_next_ticket(request):
 @api_view(['POST'])
 @permission_classes([IsServiceStaff])
 def call_specific_ticket(request):
-    #Call a specific ticket by number
+    """Call a specific ticket by number"""
     ticket_number = request.data.get('ticket_number')
     window_id = request.data.get('window_id')
     
@@ -238,24 +240,24 @@ def call_specific_ticket(request):
     service = staff_profile.assigned_service
     
     try:
-        window = ServiceWindow.objects.get(
-            id=window_id,
-            service=service,
-            status='active'
-        )
+        window = ServiceWindow.objects.get(id=window_id, service=service, status='active')
     except ServiceWindow.DoesNotExist:
         return Response({'success': False, 'message': 'Window not found or inactive'}, status=status.HTTP_404_NOT_FOUND)
 
     today = timezone.now().date()
     
-    from django.db import transaction
+    # Variables to store IDs for WebSocket updates after transaction
+    called_ticket_id = None
+    completed_ticket_id = None
+    called_ticket_display = None
+    completed_ticket_display = None
 
     with transaction.atomic():
         try:
             ticket = Ticket.objects.select_for_update().get(
-                service = service,
-                ticket_date = today,
-                display_number = ticket_number
+                service=service,
+                ticket_date=today,
+                display_number=ticket_number
             )
         except Ticket.DoesNotExist:
             return Response({'success': False,'message': f'Ticket {ticket_number} not found in today\'s queue'}, status=status.HTTP_404_NOT_FOUND)
@@ -275,30 +277,54 @@ def call_specific_ticket(request):
             current_serving.served_by = request.user
             current_serving.served_at = timezone.now()
             current_serving.save()
-            completed_ticket = current_serving.display_number
-        else:
-            completed_ticket = None
-
+            completed_ticket_display = current_serving.display_number
+            completed_ticket_id = str(current_serving.ticket_id)
+        
+        # Call the specific ticket
         ticket.status = 'serving'
         ticket.called_by = request.user
         ticket.called_at = timezone.now()
         ticket.assigned_window = window
         ticket.save()
-
+        
+        # Store IDs for WebSocket updates
+        called_ticket_id = str(ticket.ticket_id)
+        called_ticket_display = ticket.display_number
+        
+        # Get waiting tickets for later update (outside transaction)
+        waiting_tickets = list(Ticket.objects.filter(
+            service=service,
+            ticket_date=today,
+            status__in=['waiting', 'notified']
+        ))
+    
+    # 🔥 WebSocket updates outside transaction
+    send_dashboard_update()
+    send_service_update(service.id)
+    send_queue_position_updates(service.id, called_ticket_id)
+    
+    for wt in waiting_tickets:
+        send_ticket_update(str(wt.ticket_id))
+    
+    send_ticket_update(called_ticket_id)
+    
+    if completed_ticket_id:
+        send_ticket_update(completed_ticket_id)
+    
     return Response({
         'success': True,
-        'message': f'Ticket {ticket.display_number} called to {window.name}',
+        'message': f'Ticket {called_ticket_display} called to {window.name}',
         'ticket': {
-            'ticket_id': ticket.ticket_id,
-            'display_number': ticket.display_number,
-            'status': ticket.status,
+            'ticket_id': called_ticket_id,
+            'display_number': called_ticket_display,
+            'status': 'serving',
             'window': {
                 'id': window.id,
                 'name': window.name,
                 'number': window.window_number
             }
         },
-        'completed_ticket': completed_ticket
+        'completed_ticket': completed_ticket_display
     })
 
 
