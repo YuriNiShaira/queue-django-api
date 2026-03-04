@@ -14,13 +14,13 @@ logger = logging.getLogger(__name__)
 class TestConsumer(AsyncWebsocketConsumer):
     async def connect(self):
         logger.info(f"TestConsumer connect called from {self.scope.get('client')}")
-        print(f"🔌 TestConsumer connect called from {self.scope.get('client')}")
-        print(f"🔌 Path: {self.scope.get('path')}")
-        print(f"🔌 Headers: {self.scope.get('headers')}")
+        print(f"TestConsumer connect called from {self.scope.get('client')}")
+        print(f" Path: {self.scope.get('path')}")
+        print(f" Headers: {self.scope.get('headers')}")
         
         try:
             await self.accept()
-            print("✅ TestConsumer connection accepted")
+            print("TestConsumer connection accepted")
             logger.info("TestConsumer connection accepted")
             
             await self.send(text_data=json.dumps({
@@ -28,15 +28,15 @@ class TestConsumer(AsyncWebsocketConsumer):
                 'message': 'Connected to test consumer'
             }))
         except Exception as e:
-            print(f"❌ Error in connect: {e}")
+            print(f"Error in connect: {e}")
             logger.error(f"Error in connect: {e}")
     
     async def disconnect(self, close_code):
-        print(f"🔌 TestConsumer disconnected with code: {close_code}")
+        print(f"TestConsumer disconnected with code: {close_code}")
         logger.info(f"TestConsumer disconnected with code: {close_code}")
     
     async def receive(self, text_data):
-        print(f"📨 TestConsumer received: {text_data}")
+        print(f"TestConsumer received: {text_data}")
         logger.info(f"TestConsumer received: {text_data}")
         await self.send(text_data=json.dumps({
             'echo': text_data
@@ -150,11 +150,11 @@ class StaffDashboardConsumer(AsyncWebsocketConsumer):
         self.user = self.scope['user']
         
         if self.user and self.user.is_authenticated:
-            print(f"✅ User authenticated via scope: {self.user.username}")
+            print(f"User authenticated via scope: {self.user.username}")
             await self.accept()
             await self.authenticated_connect()
         else:
-            print("❌ No authenticated user in scope, waiting for manual auth")
+            print("No authenticated user in scope, waiting for manual auth")
             # Accept connection but wait for auth message
             await self.accept()
     
@@ -162,7 +162,7 @@ class StaffDashboardConsumer(AsyncWebsocketConsumer):
         """Handle messages from client"""
         try:
             data = json.loads(text_data)
-            print(f"📥 Received message: {data.get('type', 'unknown')}")
+            print(f"Received message: {data.get('type', 'unknown')}")
             
             # Handle authentication message
             if data.get('type') == 'authenticate':
@@ -173,9 +173,9 @@ class StaffDashboardConsumer(AsyncWebsocketConsumer):
                 await self.send_staff_update()
             
         except json.JSONDecodeError:
-            print("❌ Invalid JSON received")
+            print("Invalid JSON received")
         except Exception as e:
-            print(f"❌ Error in receive: {e}")
+            print(f"Error in receive: {e}")
     
     async def handle_authentication(self, data):
         """Handle manual authentication via cookies or token"""
@@ -194,10 +194,10 @@ class StaffDashboardConsumer(AsyncWebsocketConsumer):
             self.user = await self.authenticate_from_token(token)
         
         if self.user and self.user.is_authenticated:
-            print(f"✅ Manual authentication successful: {self.user.username}")
+            print(f"Manual authentication successful: {self.user.username}")
             await self.authenticated_connect()
         else:
-            print("❌ Manual authentication failed")
+            print("Manual authentication failed")
             await self.send(text_data=json.dumps({
                 'type': 'error',
                 'message': 'Authentication failed'
@@ -390,24 +390,32 @@ class TicketStatusConsumer(AsyncWebsocketConsumer):
         self.ticket_id = self.scope['url_route']['kwargs']['ticket_id']
         self.group_name = f'ticket_{self.ticket_id}'
         
+        print(f"🔌 CONSUMER: Connecting for ticket: {self.ticket_id}")
+        print(f"🔌 CONSUMER: Group name: {self.group_name}")
+        
         await self.channel_layer.group_add(
             self.group_name,
             self.channel_name
         )
         await self.accept()
+        print(f"✅ CONSUMER: Connection accepted for {self.ticket_id}")
         
         # Send initial status
         await self.send_ticket_status()
     
     async def disconnect(self, close_code):
+        print(f"🔌 CONSUMER: Disconnecting for ticket: {self.ticket_id}")
         await self.channel_layer.group_discard(
             self.group_name,
             self.channel_name
         )
     
     async def ticket_update(self, event):
-        # Called when ticket status changes OR queue position changes
-        print(f"=== TICKET UPDATE for {self.ticket_id} ===")
+        """Called when send_ticket_update() is called"""
+        print(f"🎯 CONSUMER: TICKET UPDATE RECEIVED for {self.ticket_id}")
+        print(f"🎯 CONSUMER: Event: {event}")
+        print(f"🎯 CONSUMER: Current channel: {self.channel_name}")
+        print(f"🎯 CONSUMER: Current group: {self.group_name}")
         await self.send_ticket_status()
     
     @database_sync_to_async
@@ -415,9 +423,9 @@ class TicketStatusConsumer(AsyncWebsocketConsumer):
         """Get ticket status with current queue position"""
         try:
             from .serializers import TicketSerializer
+            print(f"📊 CONSUMER: Fetching data for ticket {self.ticket_id}")
             ticket = Ticket.objects.get(ticket_id=self.ticket_id)
             
-            # Get basic ticket data
             data = TicketSerializer(ticket).data
             
             # Add queue info
@@ -432,18 +440,23 @@ class TicketStatusConsumer(AsyncWebsocketConsumer):
                 ).count()
             }
             
+            print(f"📊 CONSUMER: Data fetched for {ticket.display_number}")
             return data
         except Ticket.DoesNotExist:
+            print(f"❌ CONSUMER: Ticket {self.ticket_id} not found!")
             return None
     
     async def send_ticket_status(self):
-        # Send ticket status to client
+        """Send ticket status to client"""
+        print(f"📤 CONSUMER: Sending ticket status for {self.ticket_id}")
         data = await self.get_ticket_data()
         if data:
             await self.send(text_data=json.dumps({
                 'type': 'ticket_update',
                 'data': data
             }))
-        
+            print(f"✅ CONSUMER: Status sent for {self.ticket_id}")
+        else:
+            print(f"❌ CONSUMER: No data found for ticket {self.ticket_id}")
 
 #  daphne -b 0.0.0.0 -p 8000 backend.asgi:application
