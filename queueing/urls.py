@@ -36,7 +36,10 @@ urlpatterns = [
     path('staff/tickets/<uuid:ticket_id>/remove/', staff_views.remove_ticket, name='remove-ticket'),
     path('staff/tickets/<uuid:ticket_id>/recall/', staff_views.recall_ticket, name='recall-ticket'),
 
-    # NEW: Analytics endpoints
+    # Analytics endpoints
     path('admin/analytics/', analytics_views.admin_analytics, name='admin-analytics'),
     path('admin/analytics/service/<int:service_id>/', analytics_views.service_analytics, name='service-analytics'),
+
+    # SMS endpoints
+    path('tickets/<uuid:ticket_id>/sms-opt-in/', views.sms_opt_in, name='sms-opt-in'),
 ]
