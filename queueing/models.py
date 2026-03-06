@@ -181,13 +181,7 @@ class Ticket(models.Model):
     display_number = models.CharField(max_length=20, blank=True)
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='waiting')
 
-    assigned_window = models.ForeignKey(
-        ServiceWindow,
-        on_delete=models.SET_NULL,
-        null=True,
-        blank=True,
-        related_name='tickets'
-    )
+    assigned_window = models.ForeignKey(ServiceWindow, on_delete=models.SET_NULL, null=True, blank=True, related_name='tickets')
 
     ticket_date = models.DateField(default=timezone.now)
 
@@ -200,6 +194,10 @@ class Ticket(models.Model):
     skipped_at = models.DateTimeField(null=True, blank=True)
 
     notes = models.TextField(blank=True)
+
+    sms_phone = models.CharField(max_length=15, blank=True, null=True)
+    sms_sent = models.BooleanField(default=False)
+    sms_sent_at = models.DateTimeField(null=True, blank=True)
 
     class Meta:
         ordering = ['service', 'ticket_date', 'queue_number']
