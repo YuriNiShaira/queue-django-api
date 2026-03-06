@@ -167,3 +167,60 @@ def dashboard_status(request):
         },
         'services': service_data
     })
+
+
+@extend_schema(
+    summary="Opt-in for SMS notifications",
+    description='Store phone number for ticket notifications. Expects JSON: {"phone": "09171234567"}',
+    tags=['Public Endpoints'],
+    request={
+        "type": "object",
+        "properties": {
+            "phone": {"type": "string", "description": "Phone number in digits, e.g. 09171234567"}
+        },
+        "required": ["phone"]
+    },
+    responses={
+        200: {
+            "description": "SMS notifications enabled",
+            "type": "object",
+            "properties": {"success": {"type": "boolean"}, "message": {"type": "string"}}
+        },
+        400: {
+            "description": "Bad request (phone missing/invalid)",
+            "type": "object",
+            "properties": {"success": {"type": "boolean"}, "message": {"type": "string"}}
+        },
+        404: {
+            "description": "Ticket not found",
+            "type": "object",
+            "properties": {"success": {"type": "boolean"}, "message": {"type": "string"}}
+        }
+    }
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def sms_opt_in(request, ticket_id):
+    """
+    Store phone number for ticket notifications.
+    Expects JSON: {"phone": "09171234567"}
+    """
+    try:
+        ticket = Ticket.objects.get(ticket_id=ticket_id)
+    except Ticket.DoesNotExist:
+        return Response({'success': False, 'message': 'Ticket not found'}, status=404)
+
+    phone = request.data.get('phone')
+    if not phone:
+        return Response({'success': False, 'message': 'Phone number required'}, status=400)
+
+    # Basic validation
+    cleaned = ''.join(filter(str.isdigit, phone))
+    if len(cleaned) < 10:
+        return Response({'success': False, 'message': 'Invalid phone number'}, status=400)
+
+    ticket.sms_phone = cleaned 
+    ticket.sms_sent = False      
+    ticket.save(update_fields=['sms_phone', 'sms_sent'])
+
+    return Response({'success': True, 'message': 'SMS notifications enabled'})
