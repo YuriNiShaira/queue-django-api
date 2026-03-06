@@ -8,6 +8,7 @@ from .permissions import IsServiceStaff
 from drf_spectacular.utils import extend_schema
 from .websocket_utils import send_dashboard_update, send_service_update, send_ticket_update, send_queue_position_updates
 from django.db import transaction
+from .sms_utils import check_and_send_sms
 
 
 
@@ -177,11 +178,13 @@ def call_next_ticket(request):
 
         #Update ALL waiting tickets' queue positions
         send_queue_position_updates(service.id, str(next_ticket.ticket_id))
-
+        
         if completed_ticket:
             send_ticket_update(current_serving.ticket_id)
         send_ticket_update(next_ticket.ticket_id)
-    
+
+        check_and_send_sms(service.id, threshold=5)
+        
     # Prepare response message
     if completed_ticket:
         message = f'{window.name}: Ticket {completed_ticket} completed. Now serving {next_ticket.display_number}'
@@ -298,7 +301,7 @@ def call_specific_ticket(request):
             status__in=['waiting', 'notified']
         ))
     
-    # 🔥 WebSocket updates outside transaction
+    # WebSocket updates outside transaction
     send_dashboard_update()
     send_service_update(service.id)
     send_queue_position_updates(service.id, called_ticket_id)
@@ -310,6 +313,8 @@ def call_specific_ticket(request):
     
     if completed_ticket_id:
         send_ticket_update(completed_ticket_id)
+
+    check_and_send_sms(service.id, threshold=5)
     
     return Response({
         'success': True,
