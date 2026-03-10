@@ -42,4 +42,10 @@ urlpatterns = [
 
     # SMS endpoints
     path('tickets/<uuid:ticket_id>/sms-opt-in/', views.sms_opt_in, name='sms-opt-in'),
+
+    # SMS Settings (Admin only)
+    path('admin/sms-settings/', views.get_sms_settings, name='get-sms-settings'),
+    path('admin/sms-settings/global/', views.update_global_sms_settings, name='update-global-sms'),
+    path('admin/sms-settings/service/<int:service_id>/', views.update_service_sms_settings, name='update-service-sms'),
+    path('admin/sms-settings/service/<int:service_id>/reset/', views.reset_service_sms_settings, name='reset-service-sms'),
 ]
