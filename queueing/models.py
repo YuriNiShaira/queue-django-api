@@ -266,3 +266,41 @@ def create_initial_data(sender, **kwargs):
         admin_user.save()
 
     StaffProfile.objects.get_or_create(user=admin_user, defaults={'role': 'admin'})
+
+
+class SMSSettings(models.Model):
+    """Global and per-service SMS configuration"""
+
+    is_global = models.BooleanField(default=True)
+
+    sms_enabled = models.BooleanField(default=True)
+
+    notification_threshold = models.PositiveIntegerField(default = 5)
+
+    service = models.OneToOneField(Service,  on_delete=models.CASCADE,  null=True, blank=True,related_name='sms_settings')
+
+    updated_at = models.DateTimeField(auto_now=True)
+    updated_by = models.ForeignKey(User,  on_delete=models.SET_NULL, null=True, related_name='sms_settings_updated')
+
+    class Meta:
+        verbose_name = "SMS Setting"
+        verbose_name_plural = "SMS Settings"
+
+    def __str__(self):
+        if self.service:
+            return f"SMS Settings for {self.service.name}"
+        return "Global SMS Settings"
+    
+    @classmethod
+    def get_global_settings(cls):
+        """Get or create global settings"""
+        settings, created = cls.objects.get_or_create(is_global=True, defaults={'sms_enabled': True, 'notification_threshold': 5})
+        return settings
+    
+    @classmethod
+    def get_service_settings(cls, service):
+        """Get settings for a specific service (falls back to global)"""
+        try:
+            return cls.objects.get(service=service)
+        except cls.DoesNotExist:
+            return cls.get_global_settings()
