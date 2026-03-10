@@ -1,9 +1,9 @@
 from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.permissions import AllowAny, IsAuthenticated
+from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
 from django.utils import timezone
-from .models import Service, Ticket
+from .models import Service, Ticket, SMSSettings
 from .serializers import ServiceSerializer, TicketSerializer
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
@@ -224,3 +224,141 @@ def sms_opt_in(request, ticket_id):
     ticket.save(update_fields=['sms_phone', 'sms_sent'])
 
     return Response({'success': True, 'message': 'SMS notifications enabled'})
+
+
+@extend_schema(
+    tags=['Admin'],
+    summary='Get SMS settings',
+    description='Get global and per-service SMS notification settings'
+)
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def get_sms_settings(request):
+    """Get all SMS settings (global + per service)"""
+
+    global_settings = SMSSettings.get_global_settings()
+
+    # Get per-service settings
+    services = Service.objects.all()
+    per_service = []
+
+    for service in services:
+        try:
+            settings = SMSSettings.objects.get(service=service)
+            per_service.append({
+                'service_id': service.id,
+                'service_name': service.name,
+                'sms_enabled': settings.sms_enabled,
+                'threshold': settings.notification_threshold,
+            })
+        except SMSSettings.DoesNotExist:
+            # Using global defaults
+            per_service.append({
+                'service_id': service.id,
+                'service_name': service.name,
+                'sms_enabled': global_settings.sms_enabled,
+                'threshold': global_settings.notification_threshold,
+                'using_global': True
+            })
+
+    return Response({
+        'success': True,
+        'global': {
+            'sms_enabled': global_settings.sms_enabled,
+            'threshold': global_settings.notification_threshold,
+        },
+        'per_service': per_service
+    })
+
+@extend_schema(
+    tags=['Admin'],
+    summary='Update global SMS settings',
+    description='Update global SMS notification settings'
+)
+@api_view(['PUT', 'PATCH'])
+@permission_classes([IsAdminUser])
+def update_global_sms_settings(request):
+    """Update global SMS settings"""
+    settings = SMSSettings.get_global_settings()
+
+    sms_enabled = request.data.get('sms_enabled')
+    threshold = request.data.get('threshold')
+
+    if sms_enabled is not None:
+        settings.sms_enabled = sms_enabled
+    if threshold is not None:
+        settings.notification_threshold = threshold
+
+    settings.updated_by = request.user
+    settings.save()
+
+    return Response({
+        'success': True,
+        'message': 'Global SMS settings updated',
+        'settings': {
+            'sms_enabled': settings.sms_enabled,
+            'threshold': settings.notification_threshold,
+        }
+    })
+
+
+@extend_schema(
+    tags=['Admin'],
+    summary='Update service SMS settings',
+    description='Update SMS settings for a specific service'
+)
+@api_view(['PUT', 'PATCH'])
+@permission_classes([IsAdminUser])
+def update_service_sms_settings(request, service_id):
+    """Update SMS settings for a specific service"""
+    try:
+        service = Service.objects.get(id = service_id)
+    except Service.DoesNotExist:
+        return Response({'success': False, 'message':'Service not found'}, status=404)
+    
+    # Get or create settings for this service
+    settings, created = SMSSettings.objects.get_or_create(
+        service = service_id,
+        defaults={
+            'sms_enabled': True,
+            'notification_threshold': 5,
+            'is_global': False
+        }
+    )
+    sms_enabled = request.data.get('sms_enabled')
+    threshold = request.data.get('threshold')
+
+    if sms_enabled is not None:
+        settings.sms_enabled = sms_enabled
+    if threshold is not None:
+        settings.notification_threshold = threshold
+
+    settings.updated_by = request.user
+    settings.save()
+
+    return Response({
+        'success': True,
+        'message': f'SMS settings updated for {service.name}',
+        'settings': {
+            'service_id': service.id,
+            'service_name': service.name,
+            'sms_enabled': settings.sms_enabled,
+            'threshold': settings.notification_threshold,
+        }
+    })
+
+@extend_schema(
+    tags=['Admin'],
+    summary='Reset service to global settings',
+    description='Delete service-specific settings and revert to global'
+)
+@api_view(['DELETE'])
+@permission_classes([IsAdminUser])
+def reset_service_sms_settings(request, service_id):
+    """Delete service-specific settings (revert to global)"""
+    try:
+        settings = SMSSettings.objects.get(service_id=service_id)
+        settings.delete()
+        return Response({'success': True, 'message': 'Service reverted to global SMS settings'})
+    except SMSSettings.DoesNotExist:
+        return Response({'success': True, 'message': 'Service already using global settings'})
