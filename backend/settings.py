@@ -231,14 +231,14 @@ SIMPLE_JWT = {
     'USER_ID_FIELD': 'id',
     'USER_ID_CLAIM': 'user_id',
     
-    # Cookie settings (we'll use these in our custom views)
+    # Cookie settings
     'AUTH_COOKIE': 'access_token',
     'AUTH_COOKIE_REFRESH': 'refresh_token',
-    'AUTH_COOKIE_SECURE': False,  # Must be False for local HTTP
+    'AUTH_COOKIE_SECURE': True,
     'AUTH_COOKIE_HTTP_ONLY': True,
-    'AUTH_COOKIE_SAMESITE': 'Lax',  # Lax for development
+    'AUTH_COOKIE_SAMESITE': 'None',
     'AUTH_COOKIE_PATH': '/',
-    'AUTH_COOKIE_DOMAIN': None,  # Important! Let browser handle domain
+    'AUTH_COOKIE_DOMAIN': None,  
 }
 
 
