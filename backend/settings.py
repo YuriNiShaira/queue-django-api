@@ -47,23 +47,29 @@ INSTALLED_APPS = [
 # Channels configuration
 ASGI_APPLICATION = 'backend.asgi.application'
 
-# Use in-memory channel layer for development
-CHANNEL_LAYERS = {
-    'default': {
-        'BACKEND': 'channels.layers.InMemoryChannelLayer'
+
+# =========================
+# CHANNEL LAYERS (REDIS for Production)
+# =========================
+import redis
+
+if DEBUG:
+    # Development - in-memory
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels.layers.InMemoryChannelLayer'
+        }
     }
-}
-
-
-# For production, you'd use Redis:
-# CHANNEL_LAYERS = {
-#     'default': {
-#         'BACKEND': 'channels_redis.core.RedisChannelLayer',
-#         'CONFIG': {
-#             'hosts': [('127.0.0.1', 6379)],
-#         },
-#     },
-# }
+else:
+    # Production - Redis
+    CHANNEL_LAYERS = {
+        'default': {
+            'BACKEND': 'channels_redis.core.RedisChannelLayer',
+            'CONFIG': {
+                "hosts": [os.getenv('REDIS_URL')],
+            },
+        },
+    }
 
 
 # =========================
@@ -112,26 +118,9 @@ ROOT_URLCONF = 'backend.urls'
 
 WSGI_APPLICATION = 'backend.wsgi.application'
 
-'''
 # =========================
 # DATABASE
 # =========================
-# Uses:
-# - SQLite locally
-# - PostgreSQL on Render automatically
-
-if os.getenv("DATABASE_URL"):
-    DATABASES = {
-        "default": dj_database_url.config(default=os.getenv("DATABASE_URL"))
-    }
-else:
-    DATABASES = {
-        "default": {
-            "ENGINE": "django.db.backends.sqlite3",
-            "NAME": BASE_DIR / "db.sqlite3",
-        }
-    }
-'''
 
 DATABASES = {
     'default': {
@@ -234,9 +223,9 @@ SIMPLE_JWT = {
     # Cookie settings
     'AUTH_COOKIE': 'access_token',
     'AUTH_COOKIE_REFRESH': 'refresh_token',
-    'AUTH_COOKIE_SECURE': True,
+    'AUTH_COOKIE_SECURE': False,
     'AUTH_COOKIE_HTTP_ONLY': True,
-    'AUTH_COOKIE_SAMESITE': 'None',
+    'AUTH_COOKIE_SAMESITE': 'Lax',
     'AUTH_COOKIE_PATH': '/',
     'AUTH_COOKIE_DOMAIN': None,  
 }
