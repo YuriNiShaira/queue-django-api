@@ -318,7 +318,7 @@ def update_service_sms_settings(request, service_id):
     
     # Get or create settings for this service
     settings, created = SMSSettings.objects.get_or_create(
-        service = service_id,
+        service=service,
         defaults={
             'sms_enabled': True,
             'notification_threshold': 5,
