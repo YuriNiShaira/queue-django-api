@@ -3,8 +3,8 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
 from time import timezone
-from .models import Service
-from .serializers import ServiceSerializer
+from .models import Service, ServiceWindow
+from .serializers import ServiceSerializer, ServiceWindowSerializer
 from drf_spectacular.utils import extend_schema
 
 @extend_schema(
@@ -21,23 +21,52 @@ def service_list(request):
     
     return Response({'success': True,'count': services.count(),'services': serializer.data})
 
+
 @extend_schema(
-    summary="Service List",
-    description="Get list of all services (Admin only)",
-    tags=['Service Management']
+    tags=['Service Management'],
+    summary='Create service with optional auto-generated windows',
+    description='Create a new service and optionally auto-create specified number of windows'
 )
 @api_view(['POST'])
 @permission_classes([IsAdminUser])
 def create_service(request):
-    #Admin-only: Create new service
-    serializer = ServiceSerializer(data=request.data)
+    """
+    Create a service. If num_windows is provided, auto-create that many windows.
+    """
+    data = request.data.copy()
+    num_windows = data.pop('num_windows', None)
+    
+    serializer = ServiceSerializer(data=data)
     
     if serializer.is_valid():
         service = serializer.save()
         
-        return Response({'success': True,'message': f'Service "{service.name}" created successfully','service': ServiceSerializer(service).data}, status=status.HTTP_201_CREATED)
+        windows = []
+        if num_windows and int(num_windows) > 0:
+            for i in range(1, int(num_windows) + 1):
+                window = ServiceWindow.objects.create(
+                    service=service,
+                    window_number=i,
+                    name=f"{service.name} Window {i}",
+                    status='active',
+                    description=f"Auto-created window for {service.name}"
+                )
+                windows.append(ServiceWindowSerializer(window).data)
+        
+        response_data = {
+            'success': True,
+            'message': f'Service "{service.name}" created successfully',
+            'service': ServiceSerializer(service).data
+        }
+        
+        if windows:
+            response_data['windows'] = windows
+            response_data['message'] += f' with {num_windows} windows'
+        
+        return Response(response_data, status=status.HTTP_201_CREATED)
     
     return Response({'success': False,'message': 'Invalid data','errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+
 
 @extend_schema(
     summary="Service List",
