@@ -87,7 +87,7 @@ MIDDLEWARE = [
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
 ]
 
-CORS_ALLOW_ALL_ORIGINS = False
+CORS_ALLOW_ALL_ORIGINS = True
 CORS_ALLOW_CREDENTIALS = True
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:8000",
@@ -97,6 +97,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",
     "http://localhost:8080",
     "https://queuick-fe.vercel.app",
+    "https://kenisha-uncanny-uncivilly.ngrok-free.dev",
 ]
 
 CSRF_TRUSTED_ORIGINS = [
@@ -107,6 +108,7 @@ CSRF_TRUSTED_ORIGINS = [
     "http://localhost:5173",
     "http://localhost:8080",
     "https://queuick-fe.vercel.app",
+    "https://kenisha-uncanny-uncivilly.ngrok-free.dev",
 ]
 
 
