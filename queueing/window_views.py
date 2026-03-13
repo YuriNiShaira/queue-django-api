@@ -6,6 +6,7 @@ from .models import Service, ServiceWindow
 from .serializers import ServiceWindowSerializer
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
+from .websocket_utils import send_dashboard_update, send_service_update, send_service_status_update
 
 
 @extend_schema(
@@ -59,28 +60,43 @@ def create_service_window(request, service_id):
     
     return Response({'success': False,'message': 'Invalid data','errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
+
 @extend_schema(
-    summary="Service Windows List",
-    description="Get list of windows for a service",
-    tags=['Service Window Management']
+    tags=['Service Window Management'],
+    summary='Update service window status',
+    description='Update window status and automatically update parent service active status'
 )
 @api_view(['PUT', 'PATCH'])
 @permission_classes([IsAdminUser])
 def update_service_window(request, window_id):
-    #Admin-only: Update service window
+    """
+    Update service window. When status changes, automatically update parent service.
+    """
     try:
         window = ServiceWindow.objects.get(id=window_id)
     except ServiceWindow.DoesNotExist:
-        return Response({'success': False, 'message': 'Window not found' }, status=status.HTTP_404_NOT_FOUND)
+        return Response({'success': False, 'message': 'Window not found'}, status=status.HTTP_404_NOT_FOUND)
     
+    old_status = window.status
     serializer = ServiceWindowSerializer(window, data=request.data, partial=True)
-
+    
     if serializer.is_valid():
         window = serializer.save()
-
-        return Response({'success': True, 'message':f'Window updated successfully', 'window':serializer.data})
+        
+        # Check if status actually changed
+        if old_status != window.status:
+            # Update service active status based on window availability
+            service_updated = window.service.update_active_status()
+            
+            if service_updated:
+                send_dashboard_update()
+                send_service_update(window.service.id)
+                send_service_status_update(window.service.id, window.service.is_active)
+        
+        return Response({'success': True, 'message': f'Window updated successfully', 'window': serializer.data, 'service_active': window.service.is_active})
     
-    return Response({'success': False, 'message': 'Invalid data', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({'success': False,'message': 'Invalid data','errors': serializer.errors }, status=status.HTTP_400_BAD_REQUEST)
+
 
 @extend_schema(
     summary="Service Windows List",
@@ -90,14 +106,24 @@ def update_service_window(request, window_id):
 @api_view(['DELETE'])
 @permission_classes([IsAdminUser])
 def delete_service_window(request, window_id):
-    # Admin-only: Delete service window
+    #Delete window and update service status
     try:
         window = ServiceWindow.objects.get(id=window_id)
+        service = window.service
         window_name = window.name or f"Window {window.window_number}"
-        service_name = window.service.name
+        service_name = service.name
+        
         window.delete()
         
-        return Response({'success': True,'message': f'Window "{window_name}" deleted from {service_name}'})
+        # Update service active status
+        service_updated = service.update_active_status()
+        
+        send_dashboard_update()
+        send_service_update(service.id)
+        if service_updated:
+            send_service_status_update(service.id, service.is_active)
+        
+        return Response({'success': True, 'message': f'Window "{window_name}" deleted from {service_name}', 'service_active': service.is_active})
         
     except ServiceWindow.DoesNotExist:
-        return Response({'success': False,'message': 'Window not found'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'success': False, 'message': 'Window not found'}, status=404)
