@@ -79,3 +79,22 @@ def debounced_send_queue_updates(service_id, current_ticket_id=None, delay=0.5):
 
     _last_update_time[key] = now
     send_queue_position_updates(service_id, current_ticket_id)
+
+
+def send_service_status_update(service_id, is_active=None):
+    """Send service status update to all subscribers"""
+    channel_layer = get_channel_layer()
+    async_to_sync(channel_layer.group_send)(
+        f'service_status_{service_id}',
+        {
+            'type': 'service_status_update',
+            'service_id': service_id,
+            'is_active': is_active
+        }
+    )
+    
+    # Also update dashboards
+    send_dashboard_update()
+    send_service_update(service_id)
+
+
