@@ -11,18 +11,39 @@ from .websocket_utils import send_dashboard_update, send_service_update, send_ti
 
 
 @extend_schema(
-    summary="Generate Ticket",
-    description="Generate a new ticket for a specific service",
-    tags=['Public Endpoints']
+    summary="Public Service List",
+    description="Get list of active services for ticket generation. Optional status filter.",
+    tags=['Public Endpoints'],
+    parameters=[
+        OpenApiParameter(
+            name='status',
+            description='Filter by service status (active/inactive)',
+            required=False,
+            type=str,
+            enum=['active', 'inactive', 'all']
+        )
+    ]
 )
 @api_view(['GET'])
 @permission_classes([AllowAny])
 def public_service_list(request):
-    # Public: Get active services for ticket generation
-    services = Service.objects.filter(is_active=True).order_by('name')
-    serializer = ServiceSerializer(services, many=True)
+    """
+    Public: Get services for ticket generation.
+    Can filter by status: ?status=active (default), ?status=inactive, ?status=all
+    """
+    status_filter = request.query_params.get('status', 'active')
     
-    return Response({'success': True,'count': services.count(),'services': serializer.data})
+    services = Service.objects.all().order_by('name')
+
+    if status_filter == 'active':
+        services = services.filter(is_active=True)
+    elif status_filter == 'inactive':
+        services = services.filter(is_active=False)
+    # 'all' shows all services
+
+    serializer = ServiceSerializer(services, many=True)
+    return Response({'success': True, 'count': services.count(), 'services': serializer.data, 'filter': status_filter})
+
 
 @extend_schema(
     summary="Generate Ticket",
@@ -39,9 +60,12 @@ def generate_ticket(request):
         return Response({'success': False,'message': 'service_id is required'}, status=status.HTTP_400_BAD_REQUEST)
     
     try:
-        service = Service.objects.get(id=service_id, is_active=True)
+        service = Service.objects.get(id=service_id)
     except Service.DoesNotExist:
-        return Response({'success': False,'message': 'Service not found or inactive'}, status=status.HTTP_404_NOT_FOUND)
+        return Response({'success': False, 'message': 'Service not found'},status=status.HTTP_404_NOT_FOUND)
+    
+    if not service.is_active:
+        return Response({'success': False, 'message': 'This service is currently unavailable. Please try another service.'}, status=status.HTTP_400_BAD_REQUEST)
     
     # Create ticket
     ticket = Ticket.objects.create(service=service)
