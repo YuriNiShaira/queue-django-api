@@ -268,3 +268,47 @@ class TicketStatusConsumer(AsyncWebsocketConsumer):
                 'type': 'ticket_update',
                 'data': data
             }))
+
+
+class ServiceStatusConsumer(AsyncWebsocketConsumer):
+    async def connect(self):
+        self.service_id = self.scope['url_route']['kwargs']['service_id']
+        self.group_name = f'service_status_{self.service_id}'
+
+        await self.channel_layer.group_add(
+            self.group_name,
+            self.channel_name
+        )
+        await self.accept()
+        
+        # Send initial status
+        await self.send_service_status()
+
+        async def disconnect(self, close_code):
+            await self.channel_layer.group_discard(
+                self.group_name,
+                self.channel_name
+            )
+
+    async def service_status_update(self, event):
+        #Called when service status changes
+        await self.send_service_status()
+
+    @database_sync_to_async
+    def get_service_status(self):
+        try:
+            service = Service.objects.get(id=self.service_id)
+            return {
+                'service_id': service.id,
+                'service_name': service.name,
+                'is_active': service.is_active,
+                'active_windows_count': service.windows.filter(status='active').count(),
+                'total_windows': service.windows.count()
+            }
+        except Service.DoesNotExist:
+            return None
+        
+    async def send_service_status(self):
+        status = await self.get_service_status()
+        if status:
+            await self.send(text_data=json.dumps({'type': 'service_status', 'data': status}))
