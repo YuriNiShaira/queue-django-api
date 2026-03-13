@@ -90,6 +90,10 @@ def call_next_ticket(request):
     if not service:
         return Response({'success': False,'message': 'No service assigned'}, status=400)
     
+    # Check if service is active
+    if not service.is_active:
+        return Response({'success': False, 'message': f'Service "{service.name}" is currently inactive. Please activate a window first.'}, status=status.HTTP_400_BAD_REQUEST)
+    
     # Get window_id from request
     window_id = request.data.get('window_id')
     if not window_id:
