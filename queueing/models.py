@@ -58,6 +58,16 @@ class Service(models.Model):
             status='serving'
         ).first()
 
+    def update_active_status(self):
+        #Update service active status based on active windows
+        has_active_windows = self.windows.filter(status='active').exists()
+        if self.is_active != has_active_windows:
+            self.is_active = has_active_windows
+            self.save(update_fields=['is_active'])
+            return True
+        return False
+
+
 
 class ServiceWindow(models.Model):
     WINDOW_STATUS = [
