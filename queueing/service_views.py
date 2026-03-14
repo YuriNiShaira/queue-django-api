@@ -2,10 +2,11 @@ from rest_framework.decorators import api_view, permission_classes
 from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import IsAuthenticated, IsAdminUser
-from time import timezone
-from .models import Service, ServiceWindow
+from django.utils import timezone
+from .models import Service, ServiceWindow, Ticket
 from .serializers import ServiceSerializer, ServiceWindowSerializer
 from drf_spectacular.utils import extend_schema
+from .websocket_utils import send_dashboard_update, send_service_update, send_service_status_update
 
 @extend_schema(
     summary="Service List",
@@ -82,14 +83,32 @@ def update_service(request, service_id):
     except Service.DoesNotExist:
         return Response({'success': False,'message': 'Service not found'}, status=status.HTTP_404_NOT_FOUND)
     
+    # Track if status is changing
+    old_is_active = service.is_active
+
     serializer = ServiceSerializer(service, data=request.data, partial=True)
-    
+
     if serializer.is_valid():
         service = serializer.save()
-        
-        return Response({'success': True,'message': f'Service "{service.name}" updated successfully','service': serializer.data})
+
+        if old_is_active != service.is_active:
+            send_dashboard_update()
+            send_service_update(service.id)            
+            send_service_status_update(service.id, service.is_active)  
+
+            if not service.is_active:
+                # Optionally auto-complete any serving tickets
+                Ticket.objects.filter(
+                    service=service,
+                    status='serving'
+                ).update(
+                    status='served',
+                    served_at=timezone.now()
+                )
+                
+        return Response({'success': True, 'message': f'Service "{service.name}" updated successfully', 'service': serializer.data})
     
-    return Response({'success': False,'message': 'Invalid data','errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
+    return Response({'success': False, 'message': 'Invalid data', 'errors': serializer.errors}, status=status.HTTP_400_BAD_REQUEST)
 
 @extend_schema(
     summary="Service List",
