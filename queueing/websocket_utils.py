@@ -53,6 +53,19 @@ def send_service_update(service_id):
         import traceback
         traceback.print_exc()
 
+
+def send_windows_update(service_id):
+    """Send realtime window status updates for selection screens."""
+    channel_layer = get_channel_layer()
+    try:
+        async_to_sync(channel_layer.group_send)(
+            f'windows_{service_id}',
+            {'type': 'window_status_update'}
+        )
+    except Exception:
+        import traceback
+        traceback.print_exc()
+
 def send_queue_position_updates(service_id, current_ticket_id=None):
     """Send updates to all waiting tickets in a service"""
     today = timezone.now().date()

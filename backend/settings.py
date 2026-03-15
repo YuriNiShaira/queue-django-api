@@ -95,9 +95,11 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
+    "http://localhost:4173",
     "http://localhost:8080",
     "https://queuick-fe.vercel.app",
     "https://kenisha-uncanny-uncivilly.ngrok-free.dev",
+    "https://expert-remarkably-mustang.ngrok-free.app"
 ]
 
 CSRF_TRUSTED_ORIGINS = [
@@ -106,9 +108,11 @@ CSRF_TRUSTED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
     "http://localhost:5173",
+    "http://localhost:4173",
     "http://localhost:8080",
     "https://queuick-fe.vercel.app",
     "https://kenisha-uncanny-uncivilly.ngrok-free.dev",
+    "https://expert-remarkably-mustang.ngrok-free.app"
 ]
 
 

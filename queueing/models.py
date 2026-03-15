@@ -96,7 +96,7 @@ class ServiceWindow(models.Model):
 
     @property
     def is_available(self):
-        return self.status == 'active'
+        return self.status == 'inactive'
     
     def assign_staff(self, staff_user):
         # Clear this staff from any other window

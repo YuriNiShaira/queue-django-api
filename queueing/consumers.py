@@ -203,13 +203,17 @@ class StaffDashboardConsumer(AsyncWebsocketConsumer):
             serving = Ticket.objects.filter(service=service, ticket_date=today, status='serving').select_related('assigned_window')
 
             windows_status = []
-            for window in service.windows.filter(status='active'):
+            for window in service.windows.order_by('window_number'):
                 window_serving = serving.filter(assigned_window=window).first()
                 windows_status.append({
                     'id': window.id,
                     'name': window.name,
                     'number': window.window_number,
-                    'currently_serving': window_serving.display_number if window_serving else None
+                    'currently_serving': window_serving.display_number if window_serving else None,
+                    'status': window.status,
+                    'is_available': window.status == 'inactive',
+                    'is_in_use': window.status == 'active',
+                    'claimed_by': window.current_staff.username if window.current_staff else None,
                 })
 
             return {
@@ -268,6 +272,95 @@ class TicketStatusConsumer(AsyncWebsocketConsumer):
                 'type': 'ticket_update',
                 'data': data
             }))
+
+
+class WindowConsumer(AsyncWebsocketConsumer):
+    async def connect(self):
+        self.window_id = int(self.scope['url_route']['kwargs']['window_id'])
+        info = await self.get_window_info()
+        if not info:
+            await self.close(code=4404)
+            return
+
+        self.service_id = info['service_id']
+
+        await self.accept()
+
+    async def disconnect(self, close_code):
+        return
+
+    async def receive(self, text_data):
+        try:
+            data = json.loads(text_data)
+        except json.JSONDecodeError:
+            await self.send(text_data=json.dumps({
+                'type': 'error',
+                'message': 'Invalid JSON payload.',
+            }))
+            return
+
+        if data.get('type') not in ['reconnect', 'refresh']:
+            return
+
+        await self.send(text_data=json.dumps({
+            'type': 'reconnect_ack',
+            'window_id': self.window_id,
+            'status': 'ok',
+        }))
+
+    @database_sync_to_async
+    def get_window_info(self):
+        window = ServiceWindow.objects.filter(id=self.window_id).select_related('service').first()
+        if not window:
+            return None
+        return {'service_id': window.service_id}
+
+
+class WindowStatusConsumer(AsyncWebsocketConsumer):
+    async def connect(self):
+        self.service_id = self.scope['url_route']['kwargs']['service_id']
+        self.group_name = f'windows_{self.service_id}'
+        await self.channel_layer.group_add(self.group_name, self.channel_name)
+        await self.accept()
+        await self.send_window_status()
+
+    async def disconnect(self, close_code):
+        await self.channel_layer.group_discard(self.group_name, self.channel_name)
+
+    async def receive(self, text_data):
+        try:
+            data = json.loads(text_data)
+        except json.JSONDecodeError:
+            return
+
+        if data.get('type') == 'refresh':
+            await self.send_window_status()
+
+    async def window_status_update(self, event):
+        await self.send_window_status()
+
+    @database_sync_to_async
+    def get_windows_payload(self):
+        windows = ServiceWindow.objects.filter(service_id=self.service_id).select_related('current_staff').order_by('window_number')
+        return {
+            'service_id': int(self.service_id),
+            'windows': [
+                {
+                    'id': window.id,
+                    'name': window.name,
+                    'number': window.window_number,
+                    'status': window.status,
+                    'is_in_use': window.status == 'active',
+                    'is_available': window.status == 'inactive',
+                    'claimed_by': window.current_staff.username if window.current_staff else None,
+                }
+                for window in windows
+            ],
+        }
+
+    async def send_window_status(self):
+        payload = await self.get_windows_payload()
+        await self.send(text_data=json.dumps({'type': 'window_status_update', 'data': payload}))
 
 
 class ServiceStatusConsumer(AsyncWebsocketConsumer):

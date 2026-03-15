@@ -6,7 +6,7 @@ from .models import Service, ServiceWindow, Ticket
 from .serializers import ServiceWindowSerializer
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
-from .websocket_utils import send_dashboard_update, send_service_update, send_service_status_update, send_ticket_update
+from .websocket_utils import send_dashboard_update, send_service_update, send_service_status_update, send_ticket_update, send_windows_update
 from django.utils import timezone
 
 
@@ -53,6 +53,7 @@ def create_service_window(request, service_id):
 
     if serializer.is_valid():
         window = serializer.save()
+        send_windows_update(service.id)
 
         return Response({
             'success': True,
@@ -106,6 +107,7 @@ def update_service_window(request, window_id):
             
             send_dashboard_update()
             send_service_update(window.service.id)
+            send_windows_update(window.service.id)
             
             if service_updated:
                 send_service_status_update(window.service.id, window.service.is_active)
@@ -158,6 +160,7 @@ def delete_service_window(request, window_id):
         
         send_dashboard_update()
         send_service_update(service.id)
+        send_windows_update(service.id)
         if service_updated:
             send_service_status_update(service.id, service.is_active)
         

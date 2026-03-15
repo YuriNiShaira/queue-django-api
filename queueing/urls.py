@@ -1,5 +1,5 @@
 from django.urls import path, include
-from . import views, staff_views, window_views, auth_views, service_views, analytics_views
+from . import views, staff_views, window_views, auth_views, service_views, analytics_views, session_views
 
 app_name = 'queueing'
 
@@ -35,6 +35,10 @@ urlpatterns = [
     path('staff/tickets/<uuid:ticket_id>/complete/', staff_views.complete_serving, name='complete-serving'),
     path('staff/tickets/<uuid:ticket_id>/remove/', staff_views.remove_ticket, name='remove-ticket'),
     path('staff/tickets/<uuid:ticket_id>/recall/', staff_views.recall_ticket, name='recall-ticket'),
+
+    # Active session management
+    path('sessions/claim', session_views.claim_session, name='claim-session'),
+    path('sessions/release', session_views.release_session, name='release-session'),
 
     # Analytics endpoints
     path('admin/analytics/', analytics_views.admin_analytics, name='admin-analytics'),

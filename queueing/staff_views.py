@@ -38,9 +38,9 @@ def staff_dashboard(request):
         ticket_date=today,
         status='waiting'
     ).order_by('queue_number')
-    
+
     windows_status = []
-    for window in service.windows.filter(status='active'):
+    for window in service.windows.order_by('window_number'):
         serving = Ticket.objects.filter(
             service=service,
             assigned_window=window,
@@ -56,7 +56,10 @@ def staff_dashboard(request):
                 'ticket_id': serving.ticket_id,
                 'display_number': serving.display_number
             } if serving else None,
-            'is_available': True
+            'status': window.status,
+            'is_available': window.status == 'inactive',
+            'is_in_use': window.status == 'active',
+            'claimed_by': window.current_staff.username if window.current_staff else None,
         })
     
     return Response({
