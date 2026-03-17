@@ -5,11 +5,70 @@ from django.utils import timezone
 from django.db.models import Count, Avg, Q
 from datetime import timedelta
 from .models import Service, Ticket
+from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse, OpenApiExample
+from drf_spectacular.types import OpenApiTypes
 
+@extend_schema(
+    tags=['Admin Analytics'],
+    summary='Get admin dashboard analytics',
+    description='Returns comprehensive analytics including total tickets, average wait times, peak hours, and recent activity.',
+    responses={
+        200: OpenApiResponse(
+            response=OpenApiTypes.OBJECT,
+            description="Analytics data retrieved successfully",
+            examples=[
+                OpenApiExample(
+                    'Success Response',
+                    value={
+                        'success': True,
+                        'analytics': {
+                            'date': '2024-03-17',
+                            'summary': {
+                                'total_tickets_issued': 150,
+                                'total_tickets_served': 120,
+                                'completion_rate': 80.0,
+                                'currently_waiting': 25,
+                                'currently_serving': 5
+                            },
+                            'services': [
+                                {
+                                    'service_id': 1,
+                                    'service_name': 'Cashier',
+                                    'prefix': 'C',
+                                    'tickets_today': 50,
+                                    'served_today': 40,
+                                    'waiting_now': 8,
+                                    'serving_now': 2,
+                                    'average_wait_minutes': 4.5,
+                                    'estimated_total_wait': 32
+                                }
+                            ],
+                            'peak_hours': [
+                                {'hour': '10:00', 'tickets_issued': 25},
+                                {'hour': '11:00', 'tickets_issued': 22}
+                            ],
+                            'recent_activity': [
+                                {
+                                    'ticket': 'C045',
+                                    'service': 'Cashier',
+                                    'served_at': '14:30:25',
+                                    'wait_time': 3.5
+                                }
+                            ],
+                            'timestamp': '2024-03-17T14:30:45.123Z'
+                        }
+                    }
+                )
+            ]
+        ),
+        401: OpenApiResponse(description="❌ Unauthorized - Admin access required"),
+        403: OpenApiResponse(description="❌ Forbidden - Insufficient permissions")
+    }
+)
 @api_view(['GET'])
 @permission_classes([IsAdminUser])
 def admin_analytics(request):
-    #Get analytics data for admin dashboard
+    """Get analytics data for admin dashboard"""
     today = timezone.now().date()
     
     # ===== TOTAL TICKETS SERVED TODAY =====
@@ -23,7 +82,7 @@ def admin_analytics(request):
         service_tickets_today = tickets_today.filter(service=service)
         
         # Calculate average waiting time for served tickets
-        served = service_tickets_today.filter(status='served',called_at__isnull=False)
+        served = service_tickets_today.filter(status='served', called_at__isnull=False)
         
         wait_times = []
         for ticket in served:
@@ -51,7 +110,6 @@ def admin_analytics(request):
         })
     
     # ===== PEAK HOURS (busiest times) =====
-    # Group tickets by hour of creation
     peak_hours = []
     for hour in range(7, 19):  # 7 AM to 6 PM
         hour_count = tickets_today.filter(
@@ -78,7 +136,7 @@ def admin_analytics(request):
             'ticket': ticket.display_number,
             'service': ticket.service.name,
             'served_at': ticket.served_at.strftime('%H:%M:%S') if ticket.served_at else None,
-            'wait_time': (ticket.called_at - ticket.created_at).total_seconds() / 60 if ticket.called_at else 0
+            'wait_time': round((ticket.called_at - ticket.created_at).total_seconds() / 60, 1) if ticket.called_at else 0
         })
     
     return Response({
@@ -100,10 +158,74 @@ def admin_analytics(request):
     })
 
 
+@extend_schema(
+    tags=['Admin Analytics'],
+    summary='Get service-specific analytics',
+    description='Returns detailed analytics for a specific service including daily stats and window performance.',
+    parameters=[
+        OpenApiParameter(
+            name='service_id',
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.PATH,
+            description='ID of the service to get analytics for',
+            required=True
+        )
+    ],
+    responses={
+        200: OpenApiResponse(
+            response=OpenApiTypes.OBJECT,
+            description="✅ Service analytics retrieved successfully",
+            examples=[
+                OpenApiExample(
+                    'Success Response',
+                    value={
+                        'success': True,
+                        'analytics': {
+                            'service': {
+                                'id': 1,
+                                'name': 'Cashier',
+                                'prefix': 'C'
+                            },
+                            'daily_stats': [
+                                {
+                                    'date': '2024-03-17',
+                                    'total': 45,
+                                    'served': 38,
+                                    'cancelled': 2
+                                }
+                            ],
+                            'window_performance': [
+                                {
+                                    'window_id': 6,
+                                    'window_name': 'Cashier Window 6',
+                                    'window_number': 6,
+                                    'tickets_served': 15,
+                                    'currently_serving': True
+                                },
+                                {
+                                    'window_id': 7,
+                                    'window_name': 'Cashier Window 7',
+                                    'window_number': 7,
+                                    'tickets_served': 23,
+                                    'currently_serving': False
+                                }
+                            ],
+                            'average_service_time': 4,
+                            'total_waiting_today': 5
+                        }
+                    }
+                )
+            ]
+        ),
+        401: OpenApiResponse(description="❌ Unauthorized - Admin access required"),
+        403: OpenApiResponse(description="❌ Forbidden - Insufficient permissions"),
+        404: OpenApiResponse(description="❌ Service not found")
+    }
+)
 @api_view(['GET'])
 @permission_classes([IsAdminUser])
 def service_analytics(request, service_id):
-    #Get detailed analytics for a specific service
+    """Get detailed analytics for a specific service"""
     try:
         service = Service.objects.get(id=service_id)
     except Service.DoesNotExist:
@@ -114,10 +236,12 @@ def service_analytics(request, service_id):
 
     # Last 7 days data
     daily_stats = []
-
     for i in range(7):
         day = today - timedelta(days=i)
-        day_tickets = Ticket.objects.filter(service=service, ticket_date=day)
+        day_tickets = Ticket.objects.filter(
+            service=service, 
+            ticket_date=day
+        )
 
         daily_stats.append({
             'date': day,
@@ -126,19 +250,22 @@ def service_analytics(request, service_id):
             'cancelled': day_tickets.filter(status='cancelled').count()
         })
 
-    # Window performance
+    # Window performance with window_number added
     window_stats = []
     for window in service.windows.all():
-        window_tickets = Ticket.objects.filter(assigned_window=window, ticket_date=today)
+        window_tickets = Ticket.objects.filter(
+            assigned_window=window, 
+            ticket_date=today
+        )
 
         window_stats.append({
             'window_id': window.id,
             'window_name': window.name,
+            'window_number': window.window_number, 
             'tickets_served': window_tickets.filter(status='served').count(),
             'currently_serving': window_tickets.filter(status='serving').exists()
         })
 
-    
     return Response({
         'success': True,
         'analytics': {
