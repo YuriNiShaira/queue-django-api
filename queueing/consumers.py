@@ -211,8 +211,8 @@ class StaffDashboardConsumer(AsyncWebsocketConsumer):
                     'number': window.window_number,
                     'currently_serving': window_serving.display_number if window_serving else None,
                     'status': window.status,
-                    'is_available': window.status == 'inactive',
-                    'is_in_use': window.status == 'active',
+                    'is_available': window.is_available,
+                    'is_in_use': window.is_in_use,
                     'claimed_by': window.current_staff.username if window.current_staff else None,
                 })
 
@@ -350,8 +350,8 @@ class WindowStatusConsumer(AsyncWebsocketConsumer):
                     'name': window.name,
                     'number': window.window_number,
                     'status': window.status,
-                    'is_in_use': window.status == 'active',
-                    'is_available': window.status == 'inactive',
+                    'is_in_use': window.is_in_use,
+                    'is_available': window.is_available,
                     'claimed_by': window.current_staff.username if window.current_staff else None,
                 }
                 for window in windows

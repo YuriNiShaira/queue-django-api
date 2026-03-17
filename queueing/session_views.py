@@ -98,11 +98,11 @@ def claim_session(request):
                 status=status.HTTP_404_NOT_FOUND,
             )
 
-        if window.status == 'maintenance':
+        if window.status != 'active':
             return Response(
                 {
                     'error': 'window_unavailable',
-                    'message': 'Window is under maintenance.',
+                    'message': 'Window is unavailable.',
                 },
                 status=status.HTTP_400_BAD_REQUEST,
             )
@@ -145,7 +145,7 @@ def claim_session(request):
                     status=status.HTTP_400_BAD_REQUEST,
                 )
 
-        if window.status == 'active':
+        if window.current_staff_id and window.current_staff_id != staff_account.id:
             claimed_by = window.current_staff.username if window.current_staff else None
             return Response(
                 {
@@ -161,11 +161,27 @@ def claim_session(request):
                 status=status.HTTP_409_CONFLICT,
             )
 
-        window.status = 'active'
-        window.current_staff = staff_account
-        window.save(update_fields=['status', 'current_staff'])
+        if window.current_staff_id == staff_account.id:
+            return Response(
+                {
+                    'success': True,
+                    'message': 'Window already claimed by this staff account.',
+                    'window': {
+                        'id': window.id,
+                        'name': window.name,
+                        'number': window.window_number,
+                        'status': window.status,
+                        'current_staff': {
+                            'id': staff_account.id,
+                            'username': staff_account.username,
+                        },
+                    },
+                },
+                status=status.HTTP_200_OK,
+            )
 
-        window.service.update_active_status()
+        window.current_staff = staff_account
+        window.save(update_fields=['current_staff'])
 
     _broadcast_window_state(window.service_id)
 
@@ -238,6 +254,15 @@ def release_session(request):
                 status=status.HTTP_403_FORBIDDEN,
             )
 
+        if not window.current_staff_id:
+            return Response(
+                {
+                    'error': 'session_not_found',
+                    'message': 'This window is not currently claimed.',
+                },
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         if not request.user.is_superuser and window.current_staff_id and window.current_staff_id != request.user.id:
             return Response(
                 {
@@ -249,11 +274,8 @@ def release_session(request):
 
         completed_ticket_id = _complete_serving_ticket(window, served_by=request.user)
 
-        window.status = 'inactive'
         window.current_staff = None
-        window.save(update_fields=['status', 'current_staff'])
-
-        window.service.update_active_status()
+    window.save(update_fields=['current_staff'])
 
     _broadcast_window_state(window.service_id, completed_ticket_id)
 

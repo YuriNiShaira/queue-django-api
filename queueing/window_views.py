@@ -86,7 +86,7 @@ def update_service_window(request, window_id):
     if serializer.is_valid():
         window = serializer.save()
         
-        #If window becoming inactive, complete its current serving ticket
+        # If a usable window is disabled, complete the current ticket and clear its claim.
         completed_ticket = None
         if old_status == 'active' and window.status == 'inactive':
             current_ticket = Ticket.objects.filter(assigned_window=window, status='serving').first()
@@ -99,18 +99,15 @@ def update_service_window(request, window_id):
 
                 send_ticket_update(str(current_ticket.ticket_id))
 
-        
+            if window.current_staff_id:
+                window.current_staff = None
+                window.save(update_fields=['current_staff'])
+
         # Check if status actually changed
         if old_status != window.status:
-            # Update service active status based on window availability
-            service_updated = window.service.update_active_status()
-            
             send_dashboard_update()
             send_service_update(window.service.id)
             send_windows_update(window.service.id)
-            
-            if service_updated:
-                send_service_status_update(window.service.id, window.service.is_active)
         
         response_data = {
             'success': True,
@@ -155,14 +152,9 @@ def delete_service_window(request, window_id):
 
         window.delete()
         
-        # Update service active status
-        service_updated = service.update_active_status()
-        
         send_dashboard_update()
         send_service_update(service.id)
         send_windows_update(service.id)
-        if service_updated:
-            send_service_status_update(service.id, service.is_active)
         
         return Response({'success': True, 'message': f'Window "{window_name}" deleted from {service_name}', 'service_active': service.is_active})
         

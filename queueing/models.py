@@ -59,12 +59,7 @@ class Service(models.Model):
         ).first()
 
     def update_active_status(self):
-        #Update service active status based on active windows
-        has_active_windows = self.windows.filter(status='active').exists()
-        if self.is_active != has_active_windows:
-            self.is_active = has_active_windows
-            self.save(update_fields=['is_active'])
-            return True
+        # Service availability is managed explicitly via service.is_active.
         return False
 
 
@@ -96,7 +91,11 @@ class ServiceWindow(models.Model):
 
     @property
     def is_available(self):
-        return self.status == 'inactive'
+        return self.status == 'active' and self.current_staff_id is None
+
+    @property
+    def is_in_use(self):
+        return self.current_staff_id is not None
     
     def assign_staff(self, staff_user):
         # Clear this staff from any other window

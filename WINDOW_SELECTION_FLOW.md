@@ -4,26 +4,40 @@ This document explains the current window selection design from frontend to back
 
 ## Overview
 
-The system uses the `ServiceWindow` model itself as the source of truth for whether a window is free or in use.
+The system uses `ServiceWindow` as the source of truth for both window usability and current ownership.
 
-There is no separate runtime session table anymore.
+There is no separate runtime session table.
 
 Window meaning:
 
-- `inactive`: no staff is assigned, window is available to choose
-- `active`: window is currently in use by a staff member
-- `maintenance`: window is unavailable
+- `status` = usability state
+  - `active`: window is usable for queue operations
+  - `inactive`: window is disabled/unavailable
+  - `maintenance`: window is unavailable
+- `current_staff` = who currently owns the window claim
+- `is_in_use` = whether the window is currently claimed (`current_staff` is set)
+- `is_available` = whether the window can be claimed now (`status == active` and unclaimed)
 
-The assigned staff member is stored in `ServiceWindow.current_staff`.
+Important behavior:
+
+- Claiming a window sets `current_staff` only.
+- Releasing a window clears `current_staff` only.
+- Claim/release no longer changes `status`.
+- Service ticket availability is controlled by `service.is_active`, not by window occupancy.
 
 ## Main Backend Pieces
 
 - `queueing/models.py`
+  - `Service.is_active`
   - `ServiceWindow.status`
   - `ServiceWindow.current_staff`
+  - `ServiceWindow.is_available`
+  - `ServiceWindow.is_in_use`
 - `queueing/session_views.py`
   - `claim_session`
   - `release_session`
+- `queueing/staff_views.py`
+  - staff serving endpoints require the user to have claimed the selected window
 - `queueing/consumers.py`
   - `WindowStatusConsumer`
   - `StaffDashboardConsumer`
@@ -31,8 +45,6 @@ The assigned staff member is stored in `ServiceWindow.current_staff`.
   - `send_windows_update`
   - `send_service_update`
   - `send_dashboard_update`
-- `queueing/window_views.py`
-  - admin window create/update/delete also trigger realtime window refresh
 
 ## Frontend Flow
 
@@ -61,7 +73,7 @@ The websocket payload looks like this:
         "id": 1,
         "name": "Window 1",
         "number": 1,
-        "status": "inactive",
+        "status": "active",
         "is_in_use": false,
         "is_available": true,
         "claimed_by": null
@@ -71,13 +83,12 @@ The websocket payload looks like this:
 }
 ```
 
-The frontend should render each window directly from this payload.
-
 Recommended UI mapping:
 
-- `inactive` -> `Available`
-- `active` -> `In use`
-- `maintenance` -> `Under maintenance`
+- `status == active && is_in_use == false` -> `Available`
+- `status == active && is_in_use == true` -> `Occupied`
+- `status == inactive` -> `Unavailable`
+- `status == maintenance` -> `Under maintenance`
 
 ### 2. User chooses a window
 
@@ -100,13 +111,13 @@ Backend behavior:
 
 1. Locks the target `ServiceWindow` row using a transaction.
 2. Verifies the user has access to that service.
-3. Rejects the request if the window is already `active`.
-4. If the window is `inactive`, sets:
-   - `status = "active"`
-   - `current_staff = request user`
-5. Broadcasts realtime updates.
+3. Rejects the request when the window is not usable (`status != active`).
+4. Rejects with `window_occupied` only when another staff user already claimed it.
+5. If the same staff user already claimed it, returns success (idempotent claim).
+6. Otherwise sets `current_staff = request.user`.
+7. Broadcasts realtime updates.
 
-Success response:
+Success response example:
 
 ```json
 {
@@ -125,12 +136,12 @@ Success response:
 }
 ```
 
-If someone already chose it, backend returns:
+Conflict example:
 
 ```json
 {
   "error": "window_occupied",
-  "message": "This window is currently in use.",
+  "message": "This window is currently in use by another staff account.",
   "window": {
     "id": 1,
     "name": "Window 1",
@@ -145,22 +156,19 @@ with HTTP `409 Conflict`.
 Frontend rule:
 
 - If response is `200`, continue to dashboard.
-- If response is `409`, do not continue. Show that the window is already in use.
+- If response is `409`, show that the window is occupied and stay on selection.
+- If response is `400 window_unavailable`, show that the window cannot be selected.
 
 ### 3. Realtime reflection for other users
 
-After a successful claim, backend broadcasts window updates through:
+After a successful claim/release, backend broadcasts window updates through:
 
 - `send_windows_update(service_id)`
 - `WindowStatusConsumer`
 
-So other users on the same service should immediately see that the window changed from `inactive` to `active`.
-
-This is what makes the selection screen realtime.
+So other users on the same service immediately see changes to `is_in_use`, `is_available`, and `claimed_by`.
 
 ## Staff Dashboard Flow
-
-The staff dashboard also exposes the current status of each window.
 
 Dashboard data includes:
 
@@ -170,11 +178,11 @@ Dashboard data includes:
 - `claimed_by`
 - `currently_serving`
 
-This means the dashboard and the selection screen are reading the same backend truth.
+Staff queue-serving actions should be enabled only when the logged-in user has claimed the selected window.
 
 ## Release Flow
 
-When the staff user leaves the window, logs out, or explicitly exits the queue dashboard, the frontend should call:
+When the staff user leaves a window, logs out, or explicitly exits the queue dashboard, the frontend should call:
 
 ```text
 POST /api/sessions/release
@@ -191,34 +199,15 @@ Body:
 Backend behavior:
 
 1. Locks the `ServiceWindow` row.
-2. Verifies the current user is allowed to release it.
-3. If a ticket is currently being served on that window:
+2. Verifies release permissions.
+3. If the window is not currently claimed, returns `session_not_found`.
+4. If a ticket is currently being served on that window:
    - marks the ticket as `served`
    - sets `served_at`
    - sets `served_by`
-4. Sets:
-   - `status = "inactive"`
-   - `current_staff = null`
-5. Broadcasts realtime updates.
-
-Success response:
-
-```json
-{
-  "success": true,
-  "message": "Window released successfully.",
-  "window": {
-    "id": 1,
-    "name": "Window 1",
-    "number": 1,
-    "status": "inactive",
-    "current_staff": null
-  },
-  "completed_ticket_id": "..."
-}
-```
-
-After this, all connected clients should see the window become available again.
+5. Clears `current_staff`.
+6. Keeps `status` unchanged.
+7. Broadcasts realtime updates.
 
 ## Realtime Channels Used
 
@@ -231,7 +220,7 @@ ws/service/<service_id>/windows/
 Purpose:
 
 - powers the selection page
-- shows live active/inactive window state
+- shows live window usability and occupancy
 
 ### Staff dashboard websocket
 
@@ -242,7 +231,7 @@ ws/staff/<service_id>/
 Purpose:
 
 - powers staff dashboard updates
-- also reflects current window usage and serving ticket information
+- reflects current window occupancy and serving information
 
 ## Why Two Users Cannot Choose the Same Window
 
@@ -252,57 +241,24 @@ Key point:
 
 1. Backend uses a database transaction.
 2. Backend locks the specific window row.
-3. Backend checks whether `status == "active"`.
-4. If active, it returns `409`.
-5. If inactive, it sets the window to active and assigns staff.
+3. Backend checks whether another staff already owns `current_staff`.
+4. If owned by someone else, it returns `409`.
+5. If unclaimed, it assigns the requester.
 
-Because the row is locked during the check-and-update, two simultaneous claims on the same window cannot both succeed.
+Because the row is locked during check-and-assign, two simultaneous claims on the same window cannot both succeed.
 
 ## Current Frontend Responsibility
 
-The backend is now intentionally simpler, so frontend is responsible for a few things:
-
 1. Open one websocket connection for the selection screen.
-2. Avoid reconnect loops.
-3. Handle `409 window_occupied` properly.
-4. Call release when the user leaves the window.
-5. Try to release on tab close or page unload.
-
-Important:
-
-If the tab is closed without a release request reaching the backend, the window may remain `active` until another explicit action fixes it. In the current simplified design, tab-close cleanup depends on frontend successfully notifying the backend.
-
-## Recommended Frontend Rules
-
-### Selection page
-
-- Disable selection when `status` is `active` or `maintenance`
-- Show `claimed_by` when available
-- Treat websocket data as source of truth for the visible window list
-
-### Claim action
-
-- Do not navigate until `/api/sessions/claim` returns `200`
-- If `409`, show an error and remain on selection page
-
-### Release action
-
-- On logout, leave window, service switch, refresh, or tab close, send `/api/sessions/release`
-
-### Websocket lifecycle
-
-- Create only one socket per `service_id`
-- Do not recreate socket on every state update
-- Do not reconnect on intentional cleanup
+2. Handle `is_available`, `is_in_use`, and `status` distinctly.
+3. Handle `409 window_occupied` and `400 window_unavailable` properly.
+4. Call release when the user leaves the claimed window.
+5. Attempt release on tab close/page unload where possible.
 
 ## Summary
 
-The current design is simple:
-
-1. `ServiceWindow.status` tells whether the window is free or in use.
-2. `ServiceWindow.current_staff` tells who is using it.
-3. `/api/sessions/claim` activates and assigns the window.
-4. `/api/sessions/release` deactivates and frees the window.
-5. `ws/service/<service_id>/windows/` pushes realtime updates to the selection page.
-
-This keeps the system understandable and removes the need for a separate runtime session model.
+1. `ServiceWindow.status` describes usability, not occupancy.
+2. `ServiceWindow.current_staff` and `is_in_use` describe occupancy.
+3. `/api/sessions/claim` assigns staff ownership of a usable window.
+4. `/api/sessions/release` clears ownership but keeps window status.
+5. `ws/service/<service_id>/windows/` pushes realtime selection-state updates.

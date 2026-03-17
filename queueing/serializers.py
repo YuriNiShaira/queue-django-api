@@ -6,6 +6,7 @@ from django.contrib.auth.models import User
 class ServiceWindowSerializer(serializers.ModelSerializer):
     service_name = serializers.CharField(source='service.name', read_only=True)
     is_available = serializers.BooleanField(read_only=True)
+    is_in_use = serializers.BooleanField(read_only=True)
     current_staff_name = serializers.CharField(source='current_staff.username', read_only=True, allow_null=True)
     
     class Meta:
@@ -13,7 +14,7 @@ class ServiceWindowSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'service', 'service_name', 'window_number', 'name',
             'status', 'description', 'current_staff', 'current_staff_name',
-            'is_available', 'created_at', 'updated_at'
+            'is_available', 'is_in_use', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
 

@@ -11,6 +11,24 @@ from django.db import transaction
 from .sms_utils import check_and_send_sms
 
 
+def _get_claimed_window_for_staff(user, service, window_id):
+    try:
+        window = ServiceWindow.objects.get(id=window_id, service=service)
+    except ServiceWindow.DoesNotExist:
+        return None, Response({'success': False, 'message': 'Window not found'}, status=status.HTTP_404_NOT_FOUND)
+
+    if window.status != 'active':
+        return None, Response({'success': False, 'message': 'Window is unavailable'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if window.current_staff_id != user.id:
+        return None, Response(
+            {'success': False, 'message': 'You must claim this window before serving tickets'},
+            status=status.HTTP_403_FORBIDDEN,
+        )
+
+    return window, None
+
+
 
 @extend_schema(
     summary="queue management",
@@ -57,8 +75,8 @@ def staff_dashboard(request):
                 'display_number': serving.display_number
             } if serving else None,
             'status': window.status,
-            'is_available': window.status == 'inactive',
-            'is_in_use': window.status == 'active',
+            'is_available': window.is_available,
+            'is_in_use': window.is_in_use,
             'claimed_by': window.current_staff.username if window.current_staff else None,
         })
     
@@ -103,14 +121,9 @@ def call_next_ticket(request):
         return Response({'success': False,'message': 'window_id is required'}, status=status.HTTP_400_BAD_REQUEST)
     
     # Verify window exists and belongs to this service
-    try:
-        window = ServiceWindow.objects.get(
-            id=window_id,
-            service=service,
-            status='active'
-        )
-    except ServiceWindow.DoesNotExist:
-        return Response({'success': False,'message': 'Window not found or inactive'}, status=status.HTTP_404_NOT_FOUND)
+    window, error_response = _get_claimed_window_for_staff(request.user, service, window_id)
+    if error_response:
+        return error_response
 
     today = timezone.now().date()
     
@@ -248,10 +261,9 @@ def call_specific_ticket(request):
     staff_profile = request.user.staff_profile
     service = staff_profile.assigned_service
     
-    try:
-        window = ServiceWindow.objects.get(id=window_id, service=service, status='active')
-    except ServiceWindow.DoesNotExist:
-        return Response({'success': False, 'message': 'Window not found or inactive'}, status=status.HTTP_404_NOT_FOUND)
+    window, error_response = _get_claimed_window_for_staff(request.user, service, window_id)
+    if error_response:
+        return error_response
 
     today = timezone.now().date()
     
@@ -360,14 +372,9 @@ def start_serving(request, ticket_id):
         if not window_id:
             return Response({'success': False,'message': 'window_id is required'}, status=400)
 
-        try:
-            window = ServiceWindow.objects.get(
-                id=window_id,
-                service=ticket.service,
-                status='active'
-            )
-        except ServiceWindow.DoesNotExist:
-            return Response({'success': False,'message': 'Window not found or inactive'}, status=404)
+        window, error_response = _get_claimed_window_for_staff(request.user, ticket.service, window_id)
+        if error_response:
+            return error_response
 
         ticket.status = 'serving'
         ticket.assigned_window = window
