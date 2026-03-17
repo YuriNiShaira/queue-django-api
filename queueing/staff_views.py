@@ -6,7 +6,7 @@ from .models import Ticket, ServiceWindow
 from .serializers import TicketSerializer, ServiceWindowSerializer
 from .permissions import IsServiceStaff
 from drf_spectacular.utils import extend_schema
-from .websocket_utils import send_dashboard_update, send_service_update, send_ticket_update, send_queue_position_updates
+from .websocket_utils import send_dashboard_update, send_service_update, send_ticket_update, send_queue_position_updates, debounced_send_queue_updates
 from django.db import transaction
 from .sms_utils import check_and_send_sms
 
@@ -149,7 +149,6 @@ def call_next_ticket(request):
                 message = 'No tickets waiting in queue'
             
             # Trigger WebSocket updates even when no next ticket
-            from .websocket_utils import send_dashboard_update, send_service_update
             send_dashboard_update()
             send_service_update(service.id)
             if completed_ticket:
@@ -184,7 +183,7 @@ def call_next_ticket(request):
         send_service_update(service.id)
 
         #Update ALL waiting tickets' queue positions
-        send_queue_position_updates(service.id, str(next_ticket.ticket_id))
+        debounced_send_queue_updates(service.id, str(next_ticket.ticket_id))
         
         if completed_ticket:
             send_ticket_update(current_serving.ticket_id)

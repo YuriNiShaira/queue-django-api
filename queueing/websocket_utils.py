@@ -110,4 +110,3 @@ def send_service_status_update(service_id, is_active=None):
     send_dashboard_update()
     send_service_update(service_id)
 
-
