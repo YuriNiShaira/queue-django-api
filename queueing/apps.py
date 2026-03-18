@@ -1,20 +1,19 @@
 from django.apps import AppConfig
-
+import sys
+import os
 
 class QueueingConfig(AppConfig):
     name = 'queueing'
 
     def ready(self):
-        # Start the background APScheduler cron logic 
-        import sys
-        
-        # Prevent scheduler from running during migrations/tests
-        if 'test' in sys.argv or 'makemigrations' in sys.argv or 'migrate' in sys.argv:
+        # Skip during management commands
+        if any(arg in sys.argv for arg in ['test', 'makemigrations', 'migrate']):
             return
-            
-        import os
-        # When using Django runserver, it launches two processes. 
-        # We only want the scheduler to run in the main worker process.
-        if os.environ.get('RUN_MAIN', None) == 'true' or 'daphne' in sys.argv:
-            from . import scheduler
-            scheduler.start_scheduler()
+        
+        # Start scheduler for Daphne or main runserver process
+        if 'daphne' in sys.argv[0] or os.environ.get('RUN_MAIN') == 'true':
+            try:
+                from . import scheduler
+                scheduler.start_scheduler()
+            except Exception as e:
+                print(f"❌ Failed to start scheduler: {e}")
