@@ -52,4 +52,8 @@ urlpatterns = [
     path('admin/sms-settings/global/', views.update_global_sms_settings, name='update-global-sms'),
     path('admin/sms-settings/service/<int:service_id>/', views.update_service_sms_settings, name='update-service-sms'),
     path('admin/sms-settings/service/<int:service_id>/reset/', views.reset_service_sms_settings, name='reset-service-sms'),
+
+    # System Settings
+    path('admin/system-settings/', views.get_system_settings, name='get-system-settings'),
+    path('admin/system-settings/update/', views.update_system_settings, name='update-system-settings'),
 ]
