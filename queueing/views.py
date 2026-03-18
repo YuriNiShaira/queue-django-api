@@ -3,8 +3,8 @@ from rest_framework.response import Response
 from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
 from django.utils import timezone
-from .models import Service, Ticket, SMSSettings
-from .serializers import ServiceSerializer, TicketSerializer
+from .models import Service, Ticket, SMSSettings, SystemSettings
+from .serializers import ServiceSerializer, TicketSerializer, SystemSettingsSerializer
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
 from .websocket_utils import send_dashboard_update, send_service_update, send_ticket_update
@@ -67,9 +67,6 @@ def generate_ticket(request):
     if not service.is_active:
         return Response({'success': False, 'message': 'This service is currently unavailable. Please try another service.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    if not service.is_within_schedule():
-        return Response({'success': False, 'message': 'This service is currently outside its ticketing hours.'}, status=status.HTTP_400_BAD_REQUEST)
-    
     # Create ticket
     ticket = Ticket.objects.create(service=service)
     
@@ -389,3 +386,42 @@ def reset_service_sms_settings(request, service_id):
         return Response({'success': True, 'message': 'Service reverted to global SMS settings'})
     except SMSSettings.DoesNotExist:
         return Response({'success': True, 'message': 'Service already using global settings'})
+    
+
+@extend_schema(
+    tags=['Admin'],
+    summary='Get system settings',
+    description='Get global system settings including auto-shutdown time'
+)
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def get_system_settings(request):
+    """Get global system settings"""
+    settings = SystemSettings.get_settings()
+    serializer = SystemSettingsSerializer(settings)
+    
+    return Response({'success': True, 'settings': serializer.data})
+
+
+@extend_schema(
+    tags=['Admin'],
+    summary='Update system settings',
+    description='Update global system settings including auto-shutdown time'
+)
+@api_view(['PUT', 'PATCH'])
+@permission_classes([IsAdminUser])
+def update_system_settings(request):
+    """Update global system settings"""
+    settings = SystemSettings.get_settings()
+    
+    serializer = SystemSettingsSerializer(settings, data=request.data, partial=True)
+    
+    if serializer.is_valid():
+        serializer.save(updated_by=request.user)
+        
+        # Log the change
+        print(f"System settings updated by {request.user.username}: New shutdown time = {settings.shutdown_time}")
+        
+        return Response({'success': True, 'message': 'System settings updated successfully', 'settings': serializer.data})
+    
+    return Response({'success': False, 'message': 'Invalid data', 'errors': serializer.errors}, status=400)
