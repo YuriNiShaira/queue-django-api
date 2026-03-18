@@ -325,7 +325,7 @@ class SystemSettings(models.Model):
     
     # Auto-open and auto-shutdown settings
     auto_schedule_enabled = models.BooleanField(default=True)
-    opening_time = models.TimeField(default="08:00")  # 8:00 AM default
+    opening_time = models.TimeField(default="06:00")  # 8:00 AM default
     shutdown_time = models.TimeField(default="16:50")  # 4:50 PM default
     
     # Track changes
