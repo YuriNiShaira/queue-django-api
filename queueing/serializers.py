@@ -1,6 +1,6 @@
 # queueing/serializers.py
 from rest_framework import serializers
-from .models import Service, ServiceWindow, Ticket
+from .models import Service, ServiceWindow, Ticket, SystemSettings
 from django.contrib.auth.models import User
 
 class ServiceWindowSerializer(serializers.ModelSerializer):
@@ -31,9 +31,6 @@ class ServiceSerializer(serializers.ModelSerializer):
             'description',
             'prefix',
             'is_active',
-            'auto_schedule_enabled',
-            'auto_start_time',
-            'auto_cutoff_time',
             'average_service_time',
             'windows_count',
             'waiting_count',
@@ -70,27 +67,6 @@ class ServiceSerializer(serializers.ModelSerializer):
             raise serializers.ValidationError('Prefix already exists. Please use a unique prefix.')
         
         return value
-
-    def validate(self, attrs):
-        auto_schedule_enabled = attrs.get('auto_schedule_enabled')
-        auto_start_time = attrs.get('auto_start_time')
-        auto_cutoff_time = attrs.get('auto_cutoff_time')
-
-        if self.instance:
-            if auto_schedule_enabled is None:
-                auto_schedule_enabled = self.instance.auto_schedule_enabled
-            if auto_start_time is None:
-                auto_start_time = self.instance.auto_start_time
-            if auto_cutoff_time is None:
-                auto_cutoff_time = self.instance.auto_cutoff_time
-
-        if auto_schedule_enabled:
-            if not auto_start_time or not auto_cutoff_time:
-                raise serializers.ValidationError('auto_start_time and auto_cutoff_time are required when auto_schedule_enabled is true.')
-            if auto_start_time == auto_cutoff_time:
-                raise serializers.ValidationError('auto_start_time and auto_cutoff_time cannot be the same.')
-
-        return attrs
 
     def get_currently_serving(self, obj):
         serving = obj.currently_serving
@@ -134,3 +110,14 @@ class UserSerializer(serializers.ModelSerializer):
         model = User
         fields = ['id', 'username', 'email', 'first_name', 'last_name', 'is_staff', 'is_active', 'assigned_window']
         read_only_fields = ['id', 'is_staff']
+
+
+class SystemSettingsSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = SystemSettings
+        fields = [
+            'auto_shutdown_enabled',
+            'shutdown_time',
+            'updated_at'
+        ]
+        read_only_fields = ['updated_at']
