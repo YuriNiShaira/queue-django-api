@@ -116,7 +116,8 @@ class SystemSettingsSerializer(serializers.ModelSerializer):
     class Meta:
         model = SystemSettings
         fields = [
-            'auto_shutdown_enabled',
+            'auto_schedule_enabled',
+            'opening_time',
             'shutdown_time',
             'updated_at'
         ]
