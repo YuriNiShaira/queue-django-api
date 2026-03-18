@@ -1,54 +1,66 @@
 import logging
 from apscheduler.schedulers.background import BackgroundScheduler
 from django.utils import timezone
+import pytz
 
 logger = logging.getLogger(__name__)
 
-# Keep a simple in-memory dictionary of states since LocMemCache can sometimes behave weirdly across threads
-_SERVICE_STATE_CACHE = {}
+# Philippine Timezone
+MANILA_TZ = pytz.timezone('Asia/Manila')
 
-def evaluate_service_schedules():
-    from queueing.models import Service
-    from queueing.websocket_utils import send_service_status_update
 
-    # We only check services that have auto schedule enabled and active = True
-    services = Service.objects.filter(is_active=True, auto_schedule_enabled=True)
-    
-    print(f"[{timezone.localtime().strftime('%H:%M:%S')}] APScheduler: Checking {services.count()} scheduled services...")
-    
-    for service in services:
-        # Determine the current status
-        current_status = service.can_accept_tickets()
-        
-        previous_status = _SERVICE_STATE_CACHE.get(service.id, None)
+def check_auto_shutdown():
+    """Check if it's time to auto-shutdown all services"""
+    from queueing.models import Service, SystemSettings
+    from queueing.websocket_utils import send_dashboard_update, send_service_status_update
 
-        if previous_status is None:
-            # First run, initialize cache
-            _SERVICE_STATE_CACHE[service.id] = current_status
-            print(f"[{timezone.localtime().strftime('%H:%M:%S')}] Initialized cache for {service.name}: Accepting = {current_status}")
-        elif previous_status != current_status:
-            # Shift detected! 
-            print(f"[{timezone.localtime().strftime('%H:%M:%S')}] 🛑 ALARM: Schedule toggle detected for {service.name} (Now: {current_status}). Broadcasting WebSocket...")
-            logger.info(f"Schedule toggle detected for {service.name}: Accepting Tickets = {current_status}")
-            
-            # Broadcast the change via websockets
-            try:
+    # Get current Philippine time
+    utc_now = timezone.now()
+    manila_now = utc_now.astimezone(MANILA_TZ)
+    current_time = manila_now.time()
+
+    # Get global settings
+    settings = SystemSettings.get_settings()
+
+    if not settings.auto_shutdown_enabled:
+        return
+
+    shutdown_time = settings.shutdown_time
+
+    # Convert shutdown_time from string to time object if needed
+    if isinstance(shutdown_time, str):
+        from datetime import datetime
+        shutdown_time = datetime.strptime(shutdown_time, '%H:%M:%S').time()
+
+    # Check if current time matches shutdown time (within same minute)
+    if current_time.hour == shutdown_time.hour and current_time.minute == shutdown_time.minute:
+        logger.info("Shutdown time reached. Deactivating all services.")
+
+        # Deactivate ALL active services
+        deactivated_count = Service.objects.filter(is_active=True).update(is_active=False)
+        logger.info(f"Deactivated {deactivated_count} services.")
+
+        # Broadcast updates
+        try:
+            send_dashboard_update()
+            for service in Service.objects.all():
                 send_service_status_update(service.id)
-            except Exception as e:
-                print(f"Failed to broadcast: {e}")
-                logger.error(f"Failed to broadcast schedule update for {service.name}: {e}")
-            
-            # Update cache to latest state
-            _SERVICE_STATE_CACHE[service.id] = current_status
+        except Exception as e:
+            logger.error(f"Broadcast failed: {e}")
+
 
 def start_scheduler():
-    scheduler = BackgroundScheduler()
-    # Run the check every minute
-    scheduler.add_job(evaluate_service_schedules, 'interval', minutes=1, id='service_schedule_job', replace_existing=True)
-    
+    scheduler = BackgroundScheduler(timezone=MANILA_TZ)
+    scheduler.add_job(
+        check_auto_shutdown,
+        'interval',
+        minutes=1,
+        id='auto_shutdown_job',
+        replace_existing=True
+    )
+
     try:
         scheduler.start()
-        print("✅ APScheduler Background Job Started Successfully!")
-        logger.info("APScheduler started successfully.")
+        logger.info("Auto-shutdown scheduler started.")
     except Exception as e:
-        logger.error(f"Failed to start APScheduler: {e}")
+        logger.error(f"Failed to start scheduler: {e}")
