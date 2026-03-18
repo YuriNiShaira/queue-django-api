@@ -33,16 +33,16 @@ def public_service_list(request):
     """
     status_filter = request.query_params.get('status', 'active')
     
-    services = Service.objects.all().order_by('name')
+    services = list(Service.objects.all().order_by('name'))
 
     if status_filter == 'active':
-        services = services.filter(is_active=True)
+        services = [service for service in services if service.can_accept_tickets()]
     elif status_filter == 'inactive':
-        services = services.filter(is_active=False)
+        services = [service for service in services if not service.can_accept_tickets()]
     # 'all' shows all services
 
     serializer = ServiceSerializer(services, many=True)
-    return Response({'success': True, 'count': services.count(), 'services': serializer.data, 'filter': status_filter})
+    return Response({'success': True, 'count': len(services), 'services': serializer.data, 'filter': status_filter})
 
 
 @extend_schema(
@@ -66,6 +66,9 @@ def generate_ticket(request):
     
     if not service.is_active:
         return Response({'success': False, 'message': 'This service is currently unavailable. Please try another service.'}, status=status.HTTP_400_BAD_REQUEST)
+
+    if not service.is_within_schedule():
+        return Response({'success': False, 'message': 'This service is currently outside its ticketing hours.'}, status=status.HTTP_400_BAD_REQUEST)
     
     # Create ticket
     ticket = Ticket.objects.create(service=service)

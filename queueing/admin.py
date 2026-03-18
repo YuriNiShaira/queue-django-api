@@ -57,18 +57,31 @@ class ServiceAdmin(admin.ModelAdmin):
         'name',
         'prefix',
         'is_active',
+        'currently_accepting_tickets',
+        'auto_schedule_enabled',
+        'auto_start_time',
+        'auto_cutoff_time',
         'windows_count',
         'waiting_count',
         'currently_serving_display'
     )
-    list_filter = ('is_active', 'created_at')
+    list_filter = ('is_active', 'auto_schedule_enabled', 'created_at')
     list_editable = ('is_active', 'prefix')
     search_fields = ('name', 'description')
     readonly_fields = ('created_at', 'updated_at')
 
     fieldsets = (
         ('Service Information', {
-            'fields': ('name', 'description', 'prefix', 'is_active', 'average_service_time')
+            'fields': (
+                'name',
+                'description',
+                'prefix',
+                'is_active',
+                'auto_schedule_enabled',
+                'auto_start_time',
+                'auto_cutoff_time',
+                'average_service_time',
+            )
         }),
         ('Timestamps', {
             'fields': ('created_at', 'updated_at'),
@@ -84,6 +97,11 @@ class ServiceAdmin(admin.ModelAdmin):
         serving = obj.currently_serving
         return serving.display_number if serving else '-'
     currently_serving_display.short_description = 'Currently Serving'
+
+    def currently_accepting_tickets(self, obj):
+        return obj.can_accept_tickets()
+    currently_accepting_tickets.boolean = True
+    currently_accepting_tickets.short_description = 'Accepting Tickets Now'
 
 
 # =======================

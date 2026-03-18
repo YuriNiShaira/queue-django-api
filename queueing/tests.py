@@ -1,6 +1,8 @@
 from django.contrib.auth.models import User
 from django.test import TestCase
+from django.utils import timezone
 from rest_framework.test import APIClient
+from datetime import timedelta
 
 from .models import Service, ServiceWindow, StaffProfile, Ticket
 
@@ -130,3 +132,54 @@ class WindowSessionApiTests(TestCase):
         self.assertIsNone(self.window.current_staff)
         self.assertEqual(ticket.status, 'served')
         self.assertIsNotNone(ticket.served_at)
+
+
+class TicketScheduleTests(TestCase):
+    def setUp(self):
+        self.client = APIClient()
+        self.now_time = timezone.localtime().time().replace(second=0, microsecond=0)
+
+    def test_generate_ticket_within_schedule_succeeds(self):
+        now_dt = timezone.localtime().replace(second=0, microsecond=0)
+        start_dt = now_dt - timedelta(hours=1)
+        cutoff_dt = now_dt + timedelta(hours=1)
+
+        service = Service.objects.create(
+            name='Registrar',
+            prefix='R',
+            is_active=True,
+            auto_schedule_enabled=True,
+            auto_start_time=start_dt.time(),
+            auto_cutoff_time=cutoff_dt.time(),
+        )
+
+        response = self.client.post(
+            '/api/tickets/generate/',
+            {'service_id': service.id},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 201)
+
+    def test_generate_ticket_outside_schedule_fails(self):
+        now_dt = timezone.localtime().replace(second=0, microsecond=0)
+        start_dt = now_dt + timedelta(hours=1)
+        cutoff_dt = now_dt + timedelta(hours=2)
+
+        service = Service.objects.create(
+            name='Accounting',
+            prefix='A',
+            is_active=True,
+            auto_schedule_enabled=True,
+            auto_start_time=start_dt.time(),
+            auto_cutoff_time=cutoff_dt.time(),
+        )
+
+        response = self.client.post(
+            '/api/tickets/generate/',
+            {'service_id': service.id},
+            format='json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('outside its ticketing hours', response.data['message'])

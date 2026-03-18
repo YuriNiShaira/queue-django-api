@@ -15,6 +15,9 @@ class Service(models.Model):
     description = models.TextField(blank=True)
     prefix = models.CharField(max_length=10, default="", blank=True, unique=True)
     is_active = models.BooleanField(default=True)
+    auto_schedule_enabled = models.BooleanField(default=False)
+    auto_start_time = models.TimeField(null=True, blank=True)
+    auto_cutoff_time = models.TimeField(null=True, blank=True)
     average_service_time = models.PositiveIntegerField(default=5)
 
     created_at = models.DateTimeField(auto_now_add=True)
@@ -61,6 +64,26 @@ class Service(models.Model):
     def update_active_status(self):
         # Service availability is managed explicitly via service.is_active.
         return False
+
+    def is_within_schedule(self, current_time=None):
+        if not self.auto_schedule_enabled:
+            return True
+
+        if not self.auto_start_time or not self.auto_cutoff_time:
+            return False
+
+        now_time = current_time or timezone.localtime().time()
+        start = self.auto_start_time
+        cutoff = self.auto_cutoff_time
+
+        if start < cutoff:
+            return start <= now_time < cutoff
+
+        # Overnight schedules, e.g. 22:00 to 06:00
+        return now_time >= start or now_time < cutoff
+
+    def can_accept_tickets(self, current_time=None):
+        return self.is_active and self.is_within_schedule(current_time)
 
 
 
