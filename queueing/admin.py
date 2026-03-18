@@ -241,18 +241,19 @@ class SMSSettingsAdmin(admin.ModelAdmin):
 
 
 # =======================
-# SYSTEM SETTINGS ADMIN (NEW)
+# SYSTEM SETTINGS ADMIN
 # =======================
 @admin.register(SystemSettings)
 class SystemSettingsAdmin(admin.ModelAdmin):
-    list_display = ['id', 'auto_shutdown_enabled', 'shutdown_time', 'updated_at']
-    list_editable = ['auto_shutdown_enabled', 'shutdown_time']
+    list_display = ['id', 'auto_schedule_enabled', 'opening_time', 'shutdown_time', 'updated_at']
+    list_editable = ['auto_schedule_enabled', 'opening_time', 'shutdown_time']
     readonly_fields = ['id', 'updated_at', 'updated_by']
     
     fieldsets = (
-        ('Auto-Shutdown Settings', {
+        ('Auto Schedule Settings', {
             'fields': (
-                'auto_shutdown_enabled',
+                'auto_schedule_enabled',
+                'opening_time',
                 'shutdown_time',
             )
         }),
