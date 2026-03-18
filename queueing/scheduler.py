@@ -9,8 +9,8 @@ logger = logging.getLogger(__name__)
 MANILA_TZ = pytz.timezone('Asia/Manila')
 
 
-def check_auto_shutdown():
-    """Check if it's time to auto-shutdown all services"""
+def check_auto_schedule():
+    """Check if it's time to auto-open or auto-shutdown all services"""
     from queueing.models import Service, SystemSettings
     from queueing.websocket_utils import send_dashboard_update, send_service_status_update
 
@@ -22,21 +22,40 @@ def check_auto_shutdown():
     # Get global settings
     settings = SystemSettings.get_settings()
 
-    if not settings.auto_shutdown_enabled:
+    if not settings.auto_schedule_enabled:
         return
 
+    opening_time = settings.opening_time
     shutdown_time = settings.shutdown_time
 
-    # Convert shutdown_time from string to time object if needed
+    # Convert times from string to time object if needed
+    if isinstance(opening_time, str):
+        from datetime import datetime
+        opening_time = datetime.strptime(opening_time, '%H:%M:%S').time()
+    
     if isinstance(shutdown_time, str):
         from datetime import datetime
         shutdown_time = datetime.strptime(shutdown_time, '%H:%M:%S').time()
 
-    # Check if current time matches shutdown time (within same minute)
-    if current_time.hour == shutdown_time.hour and current_time.minute == shutdown_time.minute:
-        logger.info("Shutdown time reached. Deactivating all services.")
+    # Check if current time matches opening time (within same minute)
+    if current_time.hour == opening_time.hour and current_time.minute == opening_time.minute:
+        logger.info("Opening time reached. Activating all services.")
+        
+        activated_count = Service.objects.filter(is_active=False).update(is_active=True)
+        logger.info(f"Activated {activated_count} services.")
 
-        # Deactivate ALL active services
+        # Broadcast updates
+        try:
+            send_dashboard_update()
+            for service in Service.objects.all():
+                send_service_status_update(service.id)
+        except Exception as e:
+            logger.error(f"Broadcast failed: {e}")
+
+    # Check if current time matches shutdown time (within same minute)
+    elif current_time.hour == shutdown_time.hour and current_time.minute == shutdown_time.minute:
+        logger.info("Shutdown time reached. Deactivating all services.")
+        
         deactivated_count = Service.objects.filter(is_active=True).update(is_active=False)
         logger.info(f"Deactivated {deactivated_count} services.")
 
@@ -52,15 +71,15 @@ def check_auto_shutdown():
 def start_scheduler():
     scheduler = BackgroundScheduler(timezone=MANILA_TZ)
     scheduler.add_job(
-        check_auto_shutdown,
+        check_auto_schedule,
         'interval',
         minutes=1,
-        id='auto_shutdown_job',
+        id='auto_schedule_job',
         replace_existing=True
     )
 
     try:
         scheduler.start()
-        logger.info("Auto-shutdown scheduler started.")
+        logger.info("Auto schedule scheduler started (Open/Close).")
     except Exception as e:
         logger.error(f"Failed to start scheduler: {e}")
