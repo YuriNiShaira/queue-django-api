@@ -1,6 +1,6 @@
 from django.contrib import admin
 from django.contrib.auth.models import User
-from .models import Service, ServiceWindow, Ticket, StaffProfile, SMSSettings
+from .models import Service, ServiceWindow, Ticket, StaffProfile, SMSSettings, SystemSettings
 from django.contrib.auth.admin import UserAdmin as BaseUserAdmin
 
 
@@ -48,7 +48,7 @@ admin.site.register(User, UserAdmin)
 
 
 # =======================
-# SERVICE ADMIN (FIXED)
+# SERVICE ADMIN (UPDATED)
 # =======================
 @admin.register(Service)
 class ServiceAdmin(admin.ModelAdmin):
@@ -58,14 +58,11 @@ class ServiceAdmin(admin.ModelAdmin):
         'prefix',
         'is_active',
         'currently_accepting_tickets',
-        'auto_schedule_enabled',
-        'auto_start_time',
-        'auto_cutoff_time',
         'windows_count',
         'waiting_count',
         'currently_serving_display'
     )
-    list_filter = ('is_active', 'auto_schedule_enabled', 'created_at')
+    list_filter = ('is_active', 'created_at')
     list_editable = ('is_active', 'prefix')
     search_fields = ('name', 'description')
     readonly_fields = ('created_at', 'updated_at')
@@ -77,9 +74,6 @@ class ServiceAdmin(admin.ModelAdmin):
                 'description',
                 'prefix',
                 'is_active',
-                'auto_schedule_enabled',
-                'auto_start_time',
-                'auto_cutoff_time',
                 'average_service_time',
             )
         }),
@@ -231,6 +225,10 @@ class TicketAdmin(admin.ModelAdmin):
             'served_by'
         )
 
+
+# =======================
+# SMS SETTINGS ADMIN
+# =======================
 @admin.register(SMSSettings)
 class SMSSettingsAdmin(admin.ModelAdmin):
     list_display = ['service', 'sms_enabled', 'notification_threshold', 'updated_at']
@@ -240,3 +238,30 @@ class SMSSettingsAdmin(admin.ModelAdmin):
     
     def get_queryset(self, request):
         return super().get_queryset(request).select_related('service')
+
+
+# =======================
+# SYSTEM SETTINGS ADMIN (NEW)
+# =======================
+@admin.register(SystemSettings)
+class SystemSettingsAdmin(admin.ModelAdmin):
+    list_display = ['id', 'auto_shutdown_enabled', 'shutdown_time', 'updated_at']
+    list_editable = ['auto_shutdown_enabled', 'shutdown_time']
+    readonly_fields = ['id', 'updated_at', 'updated_by']
+    
+    fieldsets = (
+        ('Auto-Shutdown Settings', {
+            'fields': (
+                'auto_shutdown_enabled',
+                'shutdown_time',
+            )
+        }),
+        ('Audit Information', {
+            'fields': ('id', 'updated_at', 'updated_by'),
+            'classes': ('collapse',)
+        }),
+    )
+    
+    def save_model(self, request, obj, form, change):
+        obj.updated_by = request.user
+        super().save_model(request, obj, form, change)
