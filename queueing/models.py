@@ -323,34 +323,34 @@ class SystemSettings(models.Model):
     """Global system settings"""
     id = models.IntegerField(primary_key=True, default=1, editable=False)
     
-    # Auto-shutdown settings
-    auto_shutdown_enabled = models.BooleanField(default=True)
+    # Auto-open and auto-shutdown settings
+    auto_schedule_enabled = models.BooleanField(default=True)
+    opening_time = models.TimeField(default="08:00")  # 8:00 AM default
     shutdown_time = models.TimeField(default="16:50")  # 4:50 PM default
     
     # Track changes
     updated_at = models.DateTimeField(auto_now=True)
-    updated_by = models.ForeignKey(User,  on_delete=models.SET_NULL,  null=True, related_name='system_settings_updated')
+    updated_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='system_settings_updated')
     
     class Meta:
         verbose_name = "System Settings"
         verbose_name_plural = "System Settings"
     
     def save(self, *args, **kwargs):
-        # Ensure only one record exists
         self.pk = 1
         super().save(*args, **kwargs)
     
     @classmethod
     def get_settings(cls):
-        """Get or create global settings"""
         settings, created = cls.objects.get_or_create(
             pk=1,
             defaults={
-                'auto_shutdown_enabled': True,
+                'auto_schedule_enabled': True,
+                'opening_time': "08:00",
                 'shutdown_time': "16:50"
             }
         )
         return settings
     
     def __str__(self):
-        return f"System Settings (Shutdown: {self.shutdown_time})"
+        return f"System Settings (Open: {self.opening_time}, Close: {self.shutdown_time})"
