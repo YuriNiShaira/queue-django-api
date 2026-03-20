@@ -12,20 +12,28 @@ from .sms_utils import check_and_send_sms
 
 
 def _get_claimed_window_for_staff(user, service, window_id):
+    """Check if staff can use this window"""
+    if not hasattr(user, 'staff_profile'):
+        return None, Response({'success': False, 'message': 'User is not a staff member'}, status=403)
+    
     try:
-        window = ServiceWindow.objects.get(id=window_id, service=service)
+        window = ServiceWindow.objects.get(id=window_id, service=service, status='active')
     except ServiceWindow.DoesNotExist:
-        return None, Response({'success': False, 'message': 'Window not found'}, status=status.HTTP_404_NOT_FOUND)
-
-    if window.status != 'active':
-        return None, Response({'success': False, 'message': 'Window is unavailable'}, status=status.HTTP_400_BAD_REQUEST)
-
-    if window.current_staff_id != user.id:
-        return None, Response(
-            {'success': False, 'message': 'You must claim this window before serving tickets'},
-            status=status.HTTP_403_FORBIDDEN,
-        )
-
+        return None, Response({'success': False, 'message': 'Window not found or inactive'}, status=404)
+    
+    # Only block if window is claimed by a DIFFERENT user
+    if window.current_staff and window.current_staff != user:
+        return None, Response({
+            'success': False, 
+            'message': f'Window {window.name} is already being used by {window.current_staff.username}'
+        }, status=403)
+    
+    # If window is not claimed OR claimed by this user, allow
+    # Auto-assign if not claimed
+    if not window.current_staff:
+        window.current_staff = user
+        window.save()
+    
     return window, None
 
 
