@@ -4,7 +4,7 @@ from rest_framework import status
 from rest_framework.permissions import AllowAny, IsAuthenticated, IsAdminUser
 from django.utils import timezone
 from .models import Service, Ticket, SMSSettings, SystemSettings
-from .serializers import ServiceSerializer, TicketSerializer, SystemSettingsSerializer
+from .serializers import ServiceSerializer, TicketSerializer, SystemSettingsSerializer, ServiceWindowSerializer
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
 from .websocket_utils import send_dashboard_update, send_service_update, send_ticket_update
@@ -53,7 +53,6 @@ def public_service_list(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def generate_ticket(request):
-    # Public: Generate ticket for a service
     service_id = request.data.get('service_id')
     
     if not service_id:
@@ -65,21 +64,22 @@ def generate_ticket(request):
         return Response({'success': False, 'message': 'Service not found'},status=status.HTTP_404_NOT_FOUND)
     
     if not service.is_active:
-        return Response({'success': False, 'message': 'This service is currently unavailable. Please try another service.'}, status=status.HTTP_400_BAD_REQUEST)
+        return Response({'success': False, 'message': 'This service is currently unavailable.'}, status=status.HTTP_400_BAD_REQUEST)
 
-    # Create ticket
     ticket = Ticket.objects.create(service=service)
     
     send_dashboard_update()
     send_service_update(service.id)
 
-    # Prepare response
+    windows = ServiceWindowSerializer(service.windows.all(), many=True).data  # Use .all() to include inactive too
+
     response_data = {
         'success': True,
         'message': f'Ticket {ticket.display_number} generated for {service.name}',
         'ticket': {
             'ticket_id': str(ticket.ticket_id),
             'service': service.name,
+            'service_id': service.id,
             'queue_number': ticket.queue_number,
             'display_number': ticket.display_number,
             'ticket_date': str(ticket.ticket_date),
@@ -89,9 +89,11 @@ def generate_ticket(request):
             'wait_time_minutes': ticket.wait_time_minutes,
             'created_at': ticket.created_at.isoformat(),
         },
+        'windows': windows  
     }
     
     return Response(response_data, status=status.HTTP_201_CREATED)
+
 
 @extend_schema(
     summary="Generate Ticket",
