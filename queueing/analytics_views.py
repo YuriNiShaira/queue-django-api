@@ -7,6 +7,7 @@ from datetime import timedelta
 from .models import Service, Ticket
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
+from datetime import datetime, timedelta
 
 @extend_schema(
     tags=['Admin Analytics'],
@@ -68,95 +69,113 @@ from drf_spectacular.types import OpenApiTypes
 @api_view(['GET'])
 @permission_classes([IsAdminUser])
 def admin_analytics(request):
-    """Get analytics data for admin dashboard"""
+    """Get analytics data for admin dashboard with date filtering"""
     today = timezone.now().date()
-    
-    # ===== TOTAL TICKETS SERVED TODAY =====
-    tickets_today = Ticket.objects.filter(ticket_date=today)
-    total_tickets = tickets_today.count()
-    served_today = tickets_today.filter(status='served').count()
-    
-    # ===== AVERAGE WAITING TIME PER SERVICE =====
+
+    date_param = request.GET.get("date")
+    start_date_param = request.GET.get("start_date")
+    end_date_param = request.GET.get("end_date")
+
+    try:
+        if date_param:
+            selected_date = datetime.strptime(date_param, "%Y-%m-%d").date()
+            tickets = Ticket.objects.filter(ticket_date=selected_date)
+            date_label = str(selected_date)
+
+        elif start_date_param and end_date_param:
+            start_date = datetime.strptime(start_date_param, "%Y-%m-%d").date()
+            end_date = datetime.strptime(end_date_param, "%Y-%m-%d").date()
+
+            if start_date > end_date:
+                return Response(
+                    {"success": False, "message": "start_date cannot be greater than end_date"},
+                    status=400
+                )
+
+            tickets = Ticket.objects.filter(ticket_date__range=[start_date, end_date])
+            date_label = f"{start_date} to {end_date}"
+
+        else:
+            tickets = Ticket.objects.filter(ticket_date=today)
+            date_label = str(today)
+
+    except ValueError:
+        return Response(
+            {"success": False, "message": "Invalid date format. Use YYYY-MM-DD."},
+            status=400
+        )
+
+    total_tickets = tickets.count()
+    served_total = tickets.filter(status='served').count()
+    waiting_total = tickets.filter(status='waiting').count()
+    serving_total = tickets.filter(status='serving').count()
+
     services_data = []
     for service in Service.objects.all():
-        service_tickets_today = tickets_today.filter(service=service)
-        
-        # Calculate average waiting time for served tickets
-        served = service_tickets_today.filter(status='served', called_at__isnull=False)
-        
+        service_tickets = tickets.filter(service=service)
+        served_tickets = service_tickets.filter(status='served')
+
         wait_times = []
-        for ticket in served:
+        for ticket in served_tickets:
             if ticket.called_at and ticket.created_at:
-                # Wait time in minutes (called_at - created_at)
                 wait_time = (ticket.called_at - ticket.created_at).total_seconds() / 60
                 wait_times.append(wait_time)
-        
+
         avg_wait = sum(wait_times) / len(wait_times) if wait_times else 0
-        
-        # Current queue status
-        waiting = service_tickets_today.filter(status='waiting').count()
-        serving = service_tickets_today.filter(status='serving').count()
-        
+
         services_data.append({
             'service_id': service.id,
             'service_name': service.name,
             'prefix': service.prefix,
-            'tickets_today': service_tickets_today.count(),
-            'served_today': served.count(),
-            'waiting_now': waiting,
-            'serving_now': serving,
+            'tickets': service_tickets.count(),
+            'served': served_tickets.count(),
+            'waiting': service_tickets.filter(status='waiting').count(),
+            'serving': service_tickets.filter(status='serving').count(),
             'average_wait_minutes': round(avg_wait, 1),
-            'estimated_total_wait': waiting * service.average_service_time
+            'estimated_total_wait': service_tickets.filter(status='waiting').count() * service.average_service_time
         })
-    
-    # ===== PEAK HOURS (busiest times) =====
+
     peak_hours = []
-    for hour in range(7, 19):  # 7 AM to 6 PM
-        hour_count = tickets_today.filter(
-            created_at__hour=hour
-        ).count()
-        
+    for hour in range(0, 24):
+        hour_count = tickets.filter(created_at__hour=hour).count()
         if hour_count > 0:
             peak_hours.append({
-                'hour': f'{hour}:00',
+                'hour': f'{hour:02d}:00',
                 'tickets_issued': hour_count
             })
-    
-    # Sort by tickets issued (highest first)
+
     peak_hours.sort(key=lambda x: x['tickets_issued'], reverse=True)
-    
-    # ===== RECENT ACTIVITY =====
-    recent_served = tickets_today.filter(
-        status='served'
-    ).order_by('-served_at')[:10]
-    
+
+    recent_served = tickets.filter(status='served').order_by('-served_at')[:10]
     recent_activity = []
+
     for ticket in recent_served:
         recent_activity.append({
             'ticket': ticket.display_number,
             'service': ticket.service.name,
-            'served_at': ticket.served_at.strftime('%H:%M:%S') if ticket.served_at else None,
-            'wait_time': round((ticket.called_at - ticket.created_at).total_seconds() / 60, 1) if ticket.called_at else 0
+            'served_at': ticket.served_at.strftime('%Y-%m-%d %H:%M:%S') if ticket.served_at else None,
+            'wait_time': round(
+                (ticket.called_at - ticket.created_at).total_seconds() / 60, 1
+            ) if ticket.called_at and ticket.created_at else 0
         })
-    
+
     return Response({
         'success': True,
         'analytics': {
-            'date': today,
+            'date': date_label,
             'summary': {
                 'total_tickets_issued': total_tickets,
-                'total_tickets_served': served_today,
-                'completion_rate': round((served_today / total_tickets * 100) if total_tickets > 0 else 0, 1),
-                'currently_waiting': tickets_today.filter(status='waiting').count(),
-                'currently_serving': tickets_today.filter(status='serving').count()
+                'total_tickets_served': served_total,
+                'completion_rate': round((served_total / total_tickets * 100), 1) if total_tickets > 0 else 0,
+                'currently_waiting': waiting_total,
+                'currently_serving': serving_total
             },
             'services': services_data,
-            'peak_hours': peak_hours[:5],  # Top 5 busiest hours
+            'peak_hours': peak_hours[:5],
             'recent_activity': recent_activity,
             'timestamp': timezone.now().isoformat()
         }
     })
-
 
 @extend_schema(
     tags=['Admin Analytics'],
