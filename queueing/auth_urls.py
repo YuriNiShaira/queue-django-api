@@ -22,4 +22,5 @@ urlpatterns = [
     path('admin/list/', auth_views.list_admins_view, name='list-admins'),
     path('admin/<int:user_id>/update/', auth_views.update_admin_view, name='update-admin'),
     path('admin/<int:user_id>/delete/', auth_views.delete_admin_view, name='delete-admin'),
+    path("admin/staff/<int:user_id>/reset-password/", auth_views.admin_reset_staff_password_view, name="reset-staff-password"),
 ]

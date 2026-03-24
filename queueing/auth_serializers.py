@@ -101,3 +101,24 @@ class CreateAdminSerializer(serializers.ModelSerializer):
         )
         
         return user
+
+
+class AdminResetStaffPasswordSerializer(serializers.Serializer):
+    user_id = serializers.IntegerField(required=True)
+    new_password = serializers.CharField(required=True, validators=[validate_password])
+    confirm_password = serializers.CharField(required=True)
+
+    def validate(self, attrs):
+        if attrs["new_password"] != attrs["confirm_password"]:
+            raise serializers.ValidationError({"confirm_password": "Passwords do not match."})
+
+        try:
+            user = User.objects.get(id=attrs["user_id"])
+        except User.DoesNotExist:
+            raise serializers.ValidationError({"user_id": "User not found."})
+
+        if user.is_superuser:
+            raise serializers.ValidationError({"user_id": "This endpoint cannot reset another admin password."})
+
+        attrs["target_user"] = user
+        return attrs

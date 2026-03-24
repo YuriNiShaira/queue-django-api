@@ -7,7 +7,7 @@ from drf_spectacular.utils import extend_schema, OpenApiExample, OpenApiResponse
 from drf_spectacular.types import OpenApiTypes
 from django.contrib.auth import authenticate, logout
 from django.contrib.auth.models import User
-from .auth_serializers import (UserSerializer, LoginSerializer, RegisterStaffSerializer, ChangePasswordSerializer, CreateAdminSerializer)
+from .auth_serializers import (UserSerializer, LoginSerializer, RegisterStaffSerializer, ChangePasswordSerializer, CreateAdminSerializer, AdminResetStaffPasswordSerializer)
 from .authentication import set_jwt_cookies, delete_jwt_cookies
 from .serializers import ServiceWindowSerializer
 from . models import Service, StaffProfile
@@ -764,3 +764,25 @@ def update_admin_view(request, user_id):
     except User.DoesNotExist:
         return Response({'success':False, 'message':'Admin not found'}, status=404)
 
+
+@api_view(["POST"])
+@permission_classes([IsAdminUser])
+def admin_reset_staff_password_view(request, user_id):
+    new_password = request.data.get("new_password")
+    confirm_password = request.data.get("confirm_password")
+
+    if not new_password or not confirm_password:
+        return Response({"success": False,"message": "Password fields are required"}, status=400)
+
+    if new_password != confirm_password:
+        return Response({"success": False,"message": "Passwords do not match"}, status=400)
+
+    try:
+        user = User.objects.get(id=user_id, is_superuser=False)
+    except User.DoesNotExist:
+        return Response({"success": False,"message": "Staff user not found"}, status=404)
+
+    user.set_password(new_password)
+    user.save()
+
+    return Response({"success": True, "message": f"Password reset for {user.username}"})
