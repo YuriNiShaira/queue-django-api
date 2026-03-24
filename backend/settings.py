@@ -129,16 +129,27 @@ WSGI_APPLICATION = 'backend.wsgi.application'
 # =========================
 
 DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.postgresql',
-        'NAME': os.getenv('LOCAL_DB_NAME'),
-        'USER': os.getenv('LOCAL_DB_USER'),
-        'PASSWORD': os.getenv('LOCAL_DB_PASSWORD'),
-        'HOST': os.getenv('LOCAL_DB_HOST'),
-        'PORT': os.getenv('LOCAL_DB_PORT'),
-        'CONN_MAX_AGE': 60,
-    }
+    'default': dj_database_url.config(
+        default=os.getenv('DATABASE_URL'),
+        conn_max_age=600,
+        ssl_require=True
+    )
 }
+
+# DATABASES = {
+#     'default': {
+#         'ENGINE': 'django.db.backends.postgresql',
+#         'NAME': os.getenv('LOCAL_DB_NAME'),
+#         'USER': os.getenv('LOCAL_DB_USER'),
+#         'PASSWORD': os.getenv('LOCAL_DB_PASSWORD'),
+#         'HOST': os.getenv('LOCAL_DB_HOST'),
+#         'PORT': os.getenv('LOCAL_DB_PORT'),
+#         'CONN_MAX_AGE': 60,
+#          'OPTIONS': {
+#             'sslmode': 'require',
+#         },
+#     }
+# }
 
 '''
 DATABASES = {
@@ -243,9 +254,9 @@ SIMPLE_JWT = {
     # Cookie settings
     'AUTH_COOKIE': 'access_token',
     'AUTH_COOKIE_REFRESH': 'refresh_token',
-    'AUTH_COOKIE_SECURE': False,
+    'AUTH_COOKIE_SECURE': not DEBUG,
     'AUTH_COOKIE_HTTP_ONLY': True,
-    'AUTH_COOKIE_SAMESITE': 'Lax',
+   'AUTH_COOKIE_SAMESITE': 'None' if not DEBUG else 'Lax',
     'AUTH_COOKIE_PATH': '/',
     'AUTH_COOKIE_DOMAIN': None,  
 }
