@@ -94,7 +94,7 @@ def staff_dashboard(request):
             'service': service.name,
             'waiting_count': waiting.count(),
             'next_ticket': waiting.first().display_number if waiting.exists() else None,
-            'waiting_list': TicketSerializer(waiting[:10], many=True).data,
+            'waiting_list': TicketSerializer(waiting, many=True).data,
             'windows': windows_status
         }
     })
