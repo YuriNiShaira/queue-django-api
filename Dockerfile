@@ -23,6 +23,9 @@ COPY . /app/
 
 # Copy entrypoint script and grant execution permissions
 COPY entrypoint.sh /app/entrypoint.sh
+
+RUN sed -i 's/\r$//' /app/entrypoint.sh
+
 RUN chmod +x /app/entrypoint.sh
 
 # Expose the port Daphne will run on
