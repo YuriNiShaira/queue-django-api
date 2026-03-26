@@ -70,6 +70,26 @@ def set_jwt_cookies(response, user):
 
 
 def delete_jwt_cookies(response):
-    response.delete_cookie(settings.SIMPLE_JWT.get('AUTH_COOKIE', 'access_token'))
-    response.delete_cookie(settings.SIMPLE_JWT.get('AUTH_COOKIE_REFRESH', 'refresh_token'))
+    cookie_name = settings.SIMPLE_JWT.get('AUTH_COOKIE', 'access_token')
+    refresh_cookie_name = settings.SIMPLE_JWT.get('AUTH_COOKIE_REFRESH', 'refresh_token')
+    cookie_path = settings.SIMPLE_JWT.get('AUTH_COOKIE_PATH', '/')
+    cookie_domain = settings.SIMPLE_JWT.get('AUTH_COOKIE_DOMAIN', None)
+    cookie_samesite = settings.SIMPLE_JWT.get('AUTH_COOKIE_SAMESITE', 'Lax')
+    
+    # Delete Access Token
+    response.delete_cookie(
+        key=cookie_name,
+        path=cookie_path,
+        domain=cookie_domain,
+        samesite=cookie_samesite,
+    )
+    
+    # Delete Refresh Token
+    response.delete_cookie(
+        key=refresh_cookie_name,
+        path=cookie_path,
+        domain=cookie_domain,
+        samesite=cookie_samesite,
+    )
+    
     return response
