@@ -169,11 +169,14 @@ def call_next_ticket(request):
             else:
                 message = 'No tickets waiting in queue'
             
-            # Trigger WebSocket updates even when no next ticket
-            send_dashboard_update()
-            send_service_update(service.id)
-            if completed_ticket:
-                send_ticket_update(current_serving.ticket_id)
+            # Trigger WebSocket updates even when no next ticket, after transaction commits
+            def send_empty_updates():
+                send_dashboard_update()
+                send_service_update(service.id)
+                if completed_ticket:
+                    send_ticket_update(current_serving.ticket_id)
+            
+            transaction.on_commit(send_empty_updates)
             
             return Response({'success': False,'message': message}, status=status.HTTP_404_NOT_FOUND)
         
@@ -197,20 +200,22 @@ def call_next_ticket(request):
             status='waiting'
         ).order_by('queue_number').first()
         
-        # STEP 5: Trigger WebSocket updates
+        # STEP 5: Trigger WebSocket updates after transaction commits
         from .websocket_utils import send_dashboard_update, send_service_update, send_ticket_update
         
-        send_dashboard_update()
-        send_service_update(service.id)
+        def send_updates():
+            send_dashboard_update()
+            send_service_update(service.id)
+            #Update ALL waiting tickets' queue positions
+            debounced_send_queue_updates(service.id, str(next_ticket.ticket_id))
+            
+            if completed_ticket:
+                send_ticket_update(current_serving.ticket_id)
+            send_ticket_update(next_ticket.ticket_id)
 
-        #Update ALL waiting tickets' queue positions
-        debounced_send_queue_updates(service.id, str(next_ticket.ticket_id))
-        
-        if completed_ticket:
-            send_ticket_update(current_serving.ticket_id)
-        send_ticket_update(next_ticket.ticket_id)
+            check_and_send_sms(service.id, threshold=5)
 
-        check_and_send_sms(service.id, threshold=5)
+        transaction.on_commit(send_updates)
         
     # Prepare response message
     if completed_ticket:
