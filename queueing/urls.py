@@ -35,6 +35,7 @@ urlpatterns = [
     path('staff/tickets/<uuid:ticket_id>/complete/', staff_views.complete_serving, name='complete-serving'),
     path('staff/tickets/<uuid:ticket_id>/remove/', staff_views.remove_ticket, name='remove-ticket'),
     path('staff/tickets/<uuid:ticket_id>/recall/', staff_views.recall_ticket, name='recall-ticket'),
+    path('staff/tickets/<uuid:ticket_id>/skip/', staff_views.skip_ticket, name='skip-ticket'),
 
     # Active session management
     path('sessions/claim', session_views.claim_session, name='claim-session'),

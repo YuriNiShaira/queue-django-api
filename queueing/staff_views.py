@@ -46,24 +46,42 @@ def _get_claimed_window_for_staff(user, service, window_id):
 @api_view(['GET'])
 @permission_classes([IsServiceStaff])
 def staff_dashboard(request):
-    # Dashboard showing queue and per-window status
     if not hasattr(request.user, 'staff_profile'):
         return Response({'success': False, 'message': 'Not staff'}, status=403)
-    
+
     staff_profile = request.user.staff_profile
     service = staff_profile.assigned_service
-    
+
     if not service:
         return Response({'success': False, 'message': 'No service assigned'}, status=400)
-    
+
     today = timezone.now().date()
-    
-    # Get queue
+
     waiting = Ticket.objects.filter(
         service=service,
         ticket_date=today,
         status='waiting'
     ).order_by('queue_number')
+
+    notified = Ticket.objects.filter(
+        service=service,
+        ticket_date=today,
+        status='notified'
+    ).order_by('queue_number')
+
+    serving_tickets = Ticket.objects.filter(
+        service=service,
+        ticket_date=today,
+        status='serving'
+    ).order_by('called_at', 'queue_number')
+
+    skipped_tickets = Ticket.objects.filter(
+        service=service,
+        ticket_date=today,
+        status='skipped'
+    ).order_by('queue_number')
+
+    waiting_list = list(waiting) + list(notified)
 
     windows_status = []
     for window in service.windows.order_by('window_number'):
@@ -73,28 +91,35 @@ def staff_dashboard(request):
             ticket_date=today,
             status='serving'
         ).first()
-        
+
         windows_status.append({
             'id': window.id,
             'name': window.name,
             'number': window.window_number,
             'currently_serving': {
-                'ticket_id': serving.ticket_id,
+                'ticket_id': str(serving.ticket_id),
                 'display_number': serving.display_number
             } if serving else None,
             'status': window.status,
             'is_available': window.is_available,
             'is_in_use': window.is_in_use,
             'claimed_by': window.current_staff.username if window.current_staff else None,
+            'current_staff': window.current_staff.id if window.current_staff else None,
+            'current_staff_name': window.current_staff.username if window.current_staff else None,
         })
-    
+
     return Response({
         'success': True,
         'dashboard': {
             'service': service.name,
-            'waiting_count': waiting.count(),
-            'next_ticket': waiting.first().display_number if waiting.exists() else None,
-            'waiting_list': TicketSerializer(waiting, many=True).data,
+            'waiting_count': waiting.count() + notified.count(),
+            'serving_count': serving_tickets.count(),
+            'next_ticket': waiting.first().display_number if waiting.exists() else (
+                notified.first().display_number if notified.exists() else None
+            ),
+            'currently_serving': TicketSerializer(serving_tickets, many=True).data,
+            'waiting_list': TicketSerializer(waiting_list, many=True).data,
+            'skipped_list': TicketSerializer(skipped_tickets, many=True).data,
             'windows': windows_status
         }
     })
@@ -296,7 +321,7 @@ def call_specific_ticket(request):
         except Ticket.DoesNotExist:
             return Response({'success': False,'message': f'Ticket {ticket_number} not found in today\'s queue'}, status=status.HTTP_404_NOT_FOUND)
         
-        if ticket.status not in ['waiting', 'notified']:
+        if ticket.status not in ['waiting', 'notified', 'skipped']:
             return Response({'success': False, 'message': f'Ticket {ticket_number} cannot be called (current status: {ticket.status})'}, status=status.HTTP_400_BAD_REQUEST)
 
         current_serving = Ticket.objects.filter(
@@ -536,3 +561,56 @@ def toggle_queue_status(request):
             'is_active': service.is_active
         }
     })
+
+
+@extend_schema(
+    summary="Skip Ticket",
+    description="Mark a currently serving ticket as skipped instead of served",
+    tags=['Staff Queue Management']
+)
+@api_view(['POST'])
+@permission_classes([IsServiceStaff])
+def skip_ticket(request, ticket_id):
+    reason = request.data.get('reason', 'Customer not present')
+
+    try:
+        ticket = Ticket.objects.get(ticket_id=ticket_id)
+
+        if ticket.service != request.user.staff_profile.assigned_service:
+            return Response({
+                'success': False,
+                'message': 'You do not have permission to skip tickets from this service'
+            }, status=status.HTTP_403_FORBIDDEN)
+
+        if ticket.status != 'serving':
+            return Response({
+                'success': False,
+                'message': f'Ticket must be in "serving" status to be skipped. Current: {ticket.status}'
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        ticket.status = 'skipped'
+        ticket.skipped_at = timezone.now()
+        ticket.notes = f"Skipped: {reason}"
+        ticket.save()
+
+        send_dashboard_update()
+        send_service_update(ticket.service.id)
+        send_ticket_update(str(ticket.ticket_id))
+
+        return Response({
+            'success': True,
+            'message': f'Ticket {ticket.display_number} has been skipped',
+            'ticket': {
+                'ticket_id': str(ticket.ticket_id),
+                'display_number': ticket.display_number,
+                'status': ticket.status,
+                'skipped_at': ticket.skipped_at,
+                'notes': ticket.notes,
+            }
+        })
+
+    except Ticket.DoesNotExist:
+        return Response({
+            'success': False,
+            'message': 'Ticket not found'
+        }, status=status.HTTP_404_NOT_FOUND)
