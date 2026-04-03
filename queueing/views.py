@@ -53,6 +53,7 @@ def public_service_list(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def generate_ticket(request):
+    Ticket.cancel_old_tickets()
     service_id = request.data.get('service_id')
     
     if not service_id:
@@ -104,6 +105,7 @@ def generate_ticket(request):
 @permission_classes([AllowAny])
 def ticket_status(request, ticket_id):
     # Public: Check ticket status
+    Ticket.cancel_old_tickets()
     try:
         ticket = Ticket.objects.get(ticket_id=ticket_id)
         serializer = TicketSerializer(ticket)
@@ -140,6 +142,7 @@ def ticket_status(request, ticket_id):
 def dashboard_status(request):
     #Public: Get dashboard status for display screens (TV Monitor)
     #Shows all currently serving tickets across all windows
+    Ticket.cancel_old_tickets()
     services = Service.objects.filter(is_active=True).order_by('name')
     
     service_data = []

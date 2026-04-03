@@ -251,6 +251,13 @@ class Ticket(models.Model):
         if self.status in ['served', 'cancelled', 'skipped']:
             return 0
         return self.people_ahead * self.service.average_service_time
+    
+    @classmethod
+    def cancel_old_tickets(cls):
+        return cls.objects.filter(
+            ticket_date__lt=timezone.now().date(),
+            status__in=['waiting', 'notified', 'serving']
+        ).update(status='cancelled')
 
 
 # =======================
