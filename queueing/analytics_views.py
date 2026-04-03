@@ -8,6 +8,8 @@ from .models import Service, Ticket
 from drf_spectacular.utils import extend_schema, OpenApiParameter, OpenApiResponse, OpenApiExample
 from drf_spectacular.types import OpenApiTypes
 from datetime import datetime, timedelta
+import csv
+from django.http import HttpResponse
 
 @extend_schema(
     tags=['Admin Analytics'],
@@ -299,3 +301,396 @@ def service_analytics(request, service_id):
             'total_waiting_today': service.waiting_count
         }
     })
+
+
+
+@extend_schema(
+    tags=['Admin Analytics'],
+    summary='Get window analytics',
+    description='Returns per-window analytics for a specific service',
+    parameters=[
+        OpenApiParameter(
+            name='service_id',
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.PATH,
+            description='ID of the service',
+            required=True
+        ),
+        OpenApiParameter(
+            name='start_date',
+            type=str,
+            location=OpenApiParameter.QUERY,
+            description='Filter by start date (YYYY-MM-DD)',
+            required=False
+        ),
+        OpenApiParameter(
+            name='end_date',
+            type=str,
+            location=OpenApiParameter.QUERY,
+            description='Filter by end date (YYYY-MM-DD)',
+            required=False
+        ),
+    ]
+)
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def window_analytics(request, service_id):
+    """Get detailed per-window analytics for a specific service"""
+    try:
+        service = Service.objects.get(id=service_id)
+    except Service.DoesNotExist:
+        return Response({'success': False, 'message': 'Service not found'}, status=404)
+    
+    # Date filtering
+    start_date_param = request.GET.get("start_date")
+    end_date_param = request.GET.get("end_date")
+    
+    try:
+        if start_date_param and end_date_param:
+            start_date = datetime.strptime(start_date_param, "%Y-%m-%d").date()
+            end_date = datetime.strptime(end_date_param, "%Y-%m-%d").date()
+            tickets = Ticket.objects.filter(
+                ticket_date__range=[start_date, end_date],
+                service=service
+            )
+            date_label = f"{start_date} to {end_date}"
+        elif start_date_param:
+            start_date = datetime.strptime(start_date_param, "%Y-%m-%d").date()
+            tickets = Ticket.objects.filter(ticket_date=start_date, service=service)
+            date_label = str(start_date)
+        elif end_date_param:
+            end_date = datetime.strptime(end_date_param, "%Y-%m-%d").date()
+            tickets = Ticket.objects.filter(ticket_date=end_date, service=service)
+            date_label = str(end_date)
+        else:
+            today = timezone.now().date()
+            tickets = Ticket.objects.filter(ticket_date=today, service=service)
+            date_label = str(today)
+    except ValueError:
+        return Response(
+            {"success": False, "message": "Invalid date format. Use YYYY-MM-DD."},
+            status=400
+        )
+    
+    window_stats = []
+    for window in service.windows.all():
+        window_tickets = tickets.filter(assigned_window=window)
+        served_tickets = window_tickets.filter(status='served')
+        
+        # Calculate average wait time for this window
+        wait_times = []
+        for ticket in served_tickets:
+            if ticket.called_at and ticket.created_at:
+                wait_time = (ticket.called_at - ticket.created_at).total_seconds() / 60
+                wait_times.append(wait_time)
+        
+        avg_wait = sum(wait_times) / len(wait_times) if wait_times else 0
+        
+        # Daily breakdown for this window
+        daily_breakdown = []
+        if not start_date_param and not end_date_param:
+            # Just show today
+            daily_breakdown.append({
+                'date': str(today),
+                'served': served_tickets.filter(ticket_date=today).count(),
+                'cancelled': window_tickets.filter(status='cancelled', ticket_date=today).count(),
+                'avg_wait_minutes': round(avg_wait, 1)
+            })
+        else:
+            # Show breakdown by day within range
+            date_range = (end_date - start_date).days + 1 if start_date_param and end_date_param else 1
+            for i in range(date_range):
+                day = (start_date if start_date_param else today) + timedelta(days=i)
+                day_tickets = window_tickets.filter(ticket_date=day)
+                day_served = day_tickets.filter(status='served')
+                
+                day_wait_times = []
+                for ticket in day_served:
+                    if ticket.called_at and ticket.created_at:
+                        day_wait_times.append((ticket.called_at - ticket.created_at).total_seconds() / 60)
+                
+                day_avg_wait = sum(day_wait_times) / len(day_wait_times) if day_wait_times else 0
+                
+                daily_breakdown.append({
+                    'date': str(day),
+                    'served': day_served.count(),
+                    'cancelled': day_tickets.filter(status='cancelled').count(),
+                    'avg_wait_minutes': round(day_avg_wait, 1)
+                })
+        
+        window_stats.append({
+            'window_id': window.id,
+            'window_name': window.name,
+            'window_number': window.window_number,
+            'status': window.status,
+            'tickets_served': served_tickets.count(),
+            'tickets_served_total': window_tickets.filter(status='served').count(),
+            'tickets_cancelled': window_tickets.filter(status='cancelled').count(),
+            'avg_wait_minutes': round(avg_wait, 1),
+            'currently_serving': window_tickets.filter(status='serving').exists(),
+            'daily_breakdown': daily_breakdown
+        })
+    
+    # Calculate totals
+    total_served = sum(w['tickets_served'] for w in window_stats)
+    total_cancelled = sum(w['tickets_cancelled'] for w in window_stats)
+    overall_avg_wait = sum(w['avg_wait_minutes'] for w in window_stats) / len(window_stats) if window_stats else 0
+    
+    return Response({
+        'success': True,
+        'service': {
+            'id': service.id,
+            'name': service.name,
+            'prefix': service.prefix
+        },
+        'date_range': date_label,
+        'summary': {
+            'total_windows': len(window_stats),
+            'active_windows': sum(1 for w in window_stats if w['status'] == 'active'),
+            'total_served': total_served,
+            'total_cancelled': total_cancelled,
+            'overall_avg_wait_minutes': round(overall_avg_wait, 1)
+        },
+        'windows': window_stats
+    })
+
+
+@extend_schema(
+    tags=['Admin Analytics'],
+    summary='Export analytics to CSV',
+    description='Export ticket data as CSV file',
+    parameters=[
+        OpenApiParameter(
+            name='start_date',
+            type=str,
+            location=OpenApiParameter.QUERY,
+            description='Start date (YYYY-MM-DD)',
+            required=False
+        ),
+        OpenApiParameter(
+            name='end_date',
+            type=str,
+            location=OpenApiParameter.QUERY,
+            description='End date (YYYY-MM-DD)',
+            required=False
+        ),
+        OpenApiParameter(
+            name='service_id',
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.QUERY,
+            description='Filter by service ID',
+            required=False
+        ),
+        OpenApiParameter(
+            name='format',
+            type=str,
+            location=OpenApiParameter.QUERY,
+            description='Export format (csv or excel)',
+            required=False
+        ),
+    ]
+)
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def export_analytics_csv(request):
+    """Export ticket data as CSV file"""
+    
+    start_date_param = request.GET.get("start_date")
+    end_date_param = request.GET.get("end_date")
+    service_id = request.GET.get("service_id")
+
+    tickets = Ticket.objects.select_related('service', 'assigned_window', 'called_by', 'served_by')
+
+    try:
+        if start_date_param and end_date_param:
+            start_date = datetime.strptime(start_date_param, "%Y-%m-%d").date()
+            end_date = datetime.strptime(end_date_param, "%Y-%m-%d").date()
+
+            if start_date > end_date:
+                return Response(
+                    {"success": False, "message": "start_date cannot be later than end_date."},
+                    status=400
+                )
+
+            tickets = tickets.filter(ticket_date__range=[start_date, end_date])
+
+        elif start_date_param:
+            start_date = datetime.strptime(start_date_param, "%Y-%m-%d").date()
+            tickets = tickets.filter(ticket_date__gte=start_date)
+
+        elif end_date_param:
+            end_date = datetime.strptime(end_date_param, "%Y-%m-%d").date()
+            tickets = tickets.filter(ticket_date__lte=end_date)
+
+        else:
+            # default to today if no filters are provided
+            today = timezone.now().date()
+            tickets = tickets.filter(ticket_date=today)
+
+    except ValueError:
+        return Response(
+            {"success": False, "message": "Invalid date format. Use YYYY-MM-DD."},
+            status=400
+        )
+
+    if service_id:
+        tickets = tickets.filter(service_id=service_id)
+
+    response = HttpResponse(content_type='text/csv')
+    filename = f"queuick_export_{timezone.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    response.write('\uFEFF')
+
+    writer = csv.writer(response)
+
+    writer.writerow([
+        'Ticket Number', 'Service', 'Window', 'Status',
+        'Created At', 'Called At', 'Served At',
+        'Wait Time (minutes)', 'Ticket Date'
+    ])
+
+    for ticket in tickets.order_by('ticket_date', 'created_at'):
+        wait_time = 0
+        if ticket.called_at and ticket.created_at:
+            wait_time = round((ticket.called_at - ticket.created_at).total_seconds() / 60, 1)
+
+        writer.writerow([
+            ticket.display_number,
+            ticket.service.name if ticket.service else '',
+            ticket.assigned_window.name if ticket.assigned_window else 'Not Assigned',
+            ticket.status,
+            ticket.created_at.strftime('%Y-%m-%d %H:%M:%S') if ticket.created_at else '',
+            ticket.called_at.strftime('%Y-%m-%d %H:%M:%S') if ticket.called_at else '',
+            ticket.served_at.strftime('%Y-%m-%d %H:%M:%S') if ticket.served_at else '',
+            wait_time,
+            ticket.ticket_date.strftime('%Y-%m-%d') if ticket.ticket_date else '',
+        ])
+
+    return response
+
+
+@extend_schema(
+    tags=['Admin Analytics'],
+    summary='Export window performance to CSV',
+    description='Export window performance data as CSV file',
+    parameters=[
+        OpenApiParameter(
+            name='service_id',
+            type=OpenApiTypes.INT,
+            location=OpenApiParameter.PATH,
+            description='ID of the service',
+            required=True
+        ),
+        OpenApiParameter(
+            name='start_date',
+            type=str,
+            location=OpenApiParameter.QUERY,
+            description='Start date (YYYY-MM-DD)',
+            required=False
+        ),
+        OpenApiParameter(
+            name='end_date',
+            type=str,
+            location=OpenApiParameter.QUERY,
+            description='End date (YYYY-MM-DD)',
+            required=False
+        ),
+    ]
+)
+@api_view(['GET'])
+@permission_classes([IsAdminUser])
+def export_window_performance_csv(request, service_id):
+    """Export window performance data as CSV"""
+
+    try:
+        service = Service.objects.get(id=service_id)
+    except Service.DoesNotExist:
+        return Response({'success': False, 'message': 'Service not found'}, status=404)
+
+    start_date_param = request.GET.get("start_date")
+    end_date_param = request.GET.get("end_date")
+
+    try:
+        if start_date_param and end_date_param:
+            start_date = datetime.strptime(start_date_param, "%Y-%m-%d").date()
+            end_date = datetime.strptime(end_date_param, "%Y-%m-%d").date()
+
+            if start_date > end_date:
+                return Response(
+                    {"success": False, "message": "start_date cannot be later than end_date."},
+                    status=400
+                )
+
+            date_label = f"{start_date} to {end_date}"
+
+        elif start_date_param:
+            start_date = datetime.strptime(start_date_param, "%Y-%m-%d").date()
+            end_date = start_date
+            date_label = str(start_date)
+
+        elif end_date_param:
+            end_date = datetime.strptime(end_date_param, "%Y-%m-%d").date()
+            start_date = end_date
+            date_label = str(end_date)
+
+        else:
+            today = timezone.now().date()
+            start_date = today
+            end_date = today
+            date_label = str(today)
+
+    except ValueError:
+        return Response(
+            {"success": False, "message": "Invalid date format. Use YYYY-MM-DD."},
+            status=400
+        )
+
+    response = HttpResponse(content_type='text/csv')
+    filename = f"window_performance_{service.name}_{timezone.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    response['Content-Disposition'] = f'attachment; filename="{filename}"'
+    response.write('\uFEFF')
+
+    writer = csv.writer(response)
+
+    writer.writerow([
+        'Service',
+        'Date Range',
+        'Window Name',
+        'Window Number',
+        'Status',
+        'Tickets Served',
+        'Tickets Cancelled',
+        'Avg Wait Time (minutes)',
+        'Currently Serving'
+    ])
+
+    for window in service.windows.all():
+        range_tickets = Ticket.objects.filter(
+            assigned_window=window,
+            ticket_date__range=[start_date, end_date]
+        )
+
+        served_tickets = range_tickets.filter(status='served')
+        cancelled_tickets = range_tickets.filter(status='cancelled')
+        serving_exists = range_tickets.filter(status='serving').exists()
+
+        wait_times = []
+        for ticket in served_tickets:
+            if ticket.called_at and ticket.created_at:
+                wait_times.append((ticket.called_at - ticket.created_at).total_seconds() / 60)
+
+        avg_wait = sum(wait_times) / len(wait_times) if wait_times else 0
+
+        writer.writerow([
+            service.name,
+            date_label,
+            window.name,
+            window.window_number,
+            window.status,
+            served_tickets.count(),
+            cancelled_tickets.count(),
+            round(avg_wait, 1),
+            'Yes' if serving_exists else 'No'
+        ])
+
+    return response

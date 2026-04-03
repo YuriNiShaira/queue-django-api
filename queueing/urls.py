@@ -57,4 +57,8 @@ urlpatterns = [
     # System Settings
     path('admin/system-settings/', views.get_system_settings, name='get-system-settings'),
     path('admin/system-settings/update/', views.update_system_settings, name='update-system-settings'),
+
+    path('admin/analytics/window/<int:service_id>/', analytics_views.window_analytics, name='window-analytics'),
+    path('admin/analytics/export/csv/', analytics_views.export_analytics_csv, name='export-analytics-csv'),
+    path('admin/analytics/export/window/<int:service_id>/csv/', analytics_views.export_window_performance_csv, name='export-window-performance-csv'),
 ]
