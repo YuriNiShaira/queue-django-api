@@ -98,6 +98,7 @@ CORS_ALLOWED_ORIGINS = [
     "http://localhost:4173",
     "http://localhost:8080",
     "https://queuick-fe.vercel.app",
+    "https://queuick-demo.vercel.app",
     "https://kenisha-uncanny-uncivilly.ngrok-free.dev",
     "https://expert-remarkably-mustang.ngrok-free.app",
     "https://queuick-amg4azdscza0f2ef.southeastasia-01.azurewebsites.net" # Azure deployment URL
@@ -112,6 +113,7 @@ CSRF_TRUSTED_ORIGINS = [
     "http://localhost:4173",
     "http://localhost:8080",
     "https://queuick-fe.vercel.app",
+    "https://queuick-demo.vercel.app",
     "https://kenisha-uncanny-uncivilly.ngrok-free.dev",
     "https://expert-remarkably-mustang.ngrok-free.app",
     "https://queuick-amg4azdscza0f2ef.southeastasia-01.azurewebsites.net" # Azure deployment URL
