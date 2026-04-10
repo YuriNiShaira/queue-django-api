@@ -657,11 +657,9 @@ def export_window_performance_csv(request, service_id):
         'Date Range',
         'Window Name',
         'Window Number',
-        'Status',
         'Tickets Served',
         'Tickets Cancelled',
-        'Avg Wait Time (minutes)',
-        'Currently Serving'
+        'Avg Wait Time (minutes)'
     ])
 
     for window in service.windows.all():
@@ -672,12 +670,12 @@ def export_window_performance_csv(request, service_id):
 
         served_tickets = range_tickets.filter(status='served')
         cancelled_tickets = range_tickets.filter(status='cancelled')
-        serving_exists = range_tickets.filter(status='serving').exists()
 
         wait_times = []
         for ticket in served_tickets:
             if ticket.called_at and ticket.created_at:
-                wait_times.append((ticket.called_at - ticket.created_at).total_seconds() / 60)
+                wait_time = (ticket.called_at - ticket.created_at).total_seconds() / 60
+                wait_times.append(wait_time)
 
         avg_wait = sum(wait_times) / len(wait_times) if wait_times else 0
 
@@ -686,11 +684,9 @@ def export_window_performance_csv(request, service_id):
             date_label,
             window.name,
             window.window_number,
-            window.status,
             served_tickets.count(),
             cancelled_tickets.count(),
-            round(avg_wait, 1),
-            'Yes' if serving_exists else 'No'
+            round(avg_wait, 1)
         ])
 
     return response
