@@ -238,7 +238,7 @@ def call_next_ticket(request):
                 send_ticket_update(current_serving.ticket_id)
             send_ticket_update(next_ticket.ticket_id)
 
-            check_and_send_sms(service.id, threshold=5)
+            check_and_send_sms(service.id)
 
         transaction.on_commit(send_updates)
         
