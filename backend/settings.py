@@ -101,7 +101,7 @@ CORS_ALLOWED_ORIGINS = [
     "https://queuick-demo.vercel.app",
     "https://kenisha-uncanny-uncivilly.ngrok-free.dev",
     "https://expert-remarkably-mustang.ngrok-free.app",
-    "https://queuick-amg4azdscza0f2ef.southeastasia-01.azurewebsites.net" # Azure deployment URL,
+    "https://queuick-amg4azdscza0f2ef.southeastasia-01.azurewebsites.net",
     "https://queiuck-be-c7cvctdgh6h2crh5.southeastasia-01.azurewebsites.net"
 ]
 
@@ -117,7 +117,7 @@ CSRF_TRUSTED_ORIGINS = [
     "https://queuick-demo.vercel.app",
     "https://kenisha-uncanny-uncivilly.ngrok-free.dev",
     "https://expert-remarkably-mustang.ngrok-free.app",
-    "https://queuick-amg4azdscza0f2ef.southeastasia-01.azurewebsites.net" # Azure deployment URL,
+    "https://queuick-amg4azdscza0f2ef.southeastasia-01.azurewebsites.net",
     "https://queiuck-be-c7cvctdgh6h2crh5.southeastasia-01.azurewebsites.net"
 ]
 
